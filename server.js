@@ -238,42 +238,18 @@ async function llmGenerateOptions(scenario) {
 
 /* ---------------- ② Jev 执签（TypeSafe AI System One） ---------------- */
 
-async function jevDecide(scenario, options) {
+/** 原始 Jev 查询：一次 systemone 调用，可并行问多个问题 */
+async function jevQuery(state, questions) {
   const { JEV_BASE, JEV_KEY, JEV_MODEL } = getConfig();
-  const state = [
-    '一个真实的人生抉择场景，等待裁定：',
-    `场景：${scenario}`,
-    '',
-    '候选选项：',
-    ...options.map((o) => `${o.id}. ${o.title} —— ${o.description}${o.risk ? `（代价/风险：${o.risk}）` : ''}`),
-  ].join('\n');
-
-  const questions = {
-    pick: {
-      type: 'choice',
-      instructions: '如果必须替当事人选一个选项，综合考虑长远幸福、个人成长与风险承受能力，你会选哪个？',
-      criteria: Object.fromEntries(
-        options.map((o) => [o.id, `${o.title}：${o.description}${o.risk ? `（主要代价：${o.risk}）` : ''}`])
-      ),
-    },
-    gut_feeling: {
-      type: 'noul',
-      instructions: '从场景描述的措辞看，提问的人心里其实已经偏向其中某一个选项。',
-    },
-    importance: {
-      type: 'score',
-      instructions: '这个决定对当事人人生的影响程度。',
-      criteria: IMPORTANCE_LEVELS,
-    },
-  };
-
-  const resp = await postJSON(`${JEV_BASE}/v1/systemone`, { state, model: JEV_MODEL, questions }, {
+  return postJSON(`${JEV_BASE}/v1/systemone`, { state, model: JEV_MODEL, questions }, {
     timeoutMs: 30000,
     headers: { Authorization: `Bearer ${JEV_KEY}` },
   });
+}
 
-  const answers = resp.answers || {};
-  const pick = answers.pick || {};
+/** 把 Jev 的 choice 答案归一化成 {choice, probabilities, confidence} */
+function normalizePick(pick, options) {
+  pick = pick || {};
   const rawProbs = pick.probabilities || {};
   const validIds = new Set(options.map((o) => o.id));
 
@@ -294,23 +270,106 @@ async function jevDecide(scenario, options) {
     choice = best ? best[0] : options[0].id;
   }
 
+  return {
+    choice,
+    probabilities: probs,
+    confidence: Number.isFinite(Number(pick.confidence)) ? Number(pick.confidence) : null,
+  };
+}
+
+/** 构造选项场景文本（裁定与压力测试共用） */
+function buildState(scenario, options) {
+  return [
+    '一个真实的人生抉择场景，等待裁定：',
+    `场景：${scenario}`,
+    '',
+    '候选选项：',
+    ...options.map((o) => `${o.id}. ${o.title} —— ${o.description}${o.risk ? `（代价/风险：${o.risk}）` : ''}`),
+  ].join('\n');
+}
+
+/** 构造 choice 问题（裁定与压力测试共用） */
+function pickQuestion(options) {
+  return {
+    type: 'choice',
+    instructions: '如果必须替当事人选一个选项，综合考虑长远幸福、个人成长与风险承受能力，你会选哪个？',
+    criteria: Object.fromEntries(
+      options.map((o) => [o.id, `${o.title}：${o.description}${o.risk ? `（主要代价：${o.risk}）` : ''}`])
+    ),
+  };
+}
+
+async function jevDecide(scenario, options) {
+  const questions = {
+    pick: pickQuestion(options),
+    gut_feeling: {
+      type: 'noul',
+      instructions: '从场景描述的措辞看，提问的人心里其实已经偏向其中某一个选项。',
+    },
+    importance: {
+      type: 'score',
+      instructions: '这个决定对当事人人生的影响程度。',
+      criteria: IMPORTANCE_LEVELS,
+    },
+  };
+
+  const resp = await jevQuery(buildState(scenario, options), questions);
+  const answers = resp.answers || {};
+  const picked = normalizePick(answers.pick, options);
+
   const impRaw = Number(answers.importance?.score);
   const impLevel = Number.isFinite(impRaw)
     ? Math.min(IMPORTANCE_LEVELS.length - 1, Math.max(0, Math.round(impRaw)))
     : null;
 
   return {
-    choice,
-    probabilities: probs,
-    confidence: Number.isFinite(Number(pick.confidence)) ? Number(pick.confidence) : null,
+    ...picked,
     gutFeeling: Number.isFinite(Number(answers.gut_feeling?.noul)) ? Number(answers.gut_feeling.noul) : null,
     importance:
       impLevel === null
         ? null
         : { score: impRaw, level: impLevel, label: IMPORTANCE_LEVELS[impLevel] },
-    model: resp.model || JEV_MODEL,
+    model: resp.model || getConfig().JEV_MODEL,
     usage: resp.usage || null,
   };
+}
+
+/* ---------------- ③ 决策压力测试：变体生成 + 复裁 ---------------- */
+
+const STRESS_SYSTEM_PROMPT = [
+  '你是「决策压力测试」设计师。给定一个人生抉择场景，生成 3 个压力变体：',
+  '每个变体在原场景上增加或改变一个关键条件，用来测试原决策是否稳健。',
+  '三个变体要有区分度：一个偏不利条件、一个偏有利条件、一个改变核心约束。',
+  '只输出 JSON，不要任何多余文字，格式：',
+  '{"variants":[{"label":"变体名，不超过8个字","scenario":"改写后的完整场景，不超过120字"}]}',
+].join('\n');
+
+async function llmGenerateVariants(scenario) {
+  const { LLM_BASE, LLM_KEY, LLM_MODEL } = getConfig();
+  const data = await postJSON(`${LLM_BASE}/chat/completions`, {
+    model: LLM_MODEL,
+    messages: [
+      { role: 'system', content: STRESS_SYSTEM_PROMPT },
+      { role: 'user', content: `人生场景：${scenario}` },
+    ],
+    temperature: 0.8,
+  }, { timeoutMs: 60000, headers: { Authorization: `Bearer ${LLM_KEY}` } });
+
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error('LLM 没有返回内容');
+  const parsed = extractJSON(content);
+  const list = Array.isArray(parsed) ? parsed : parsed.variants;
+  if (!Array.isArray(list) || !list.length) throw new Error('LLM 没有返回变体');
+  return list.slice(0, 3).map((v, i) => ({
+    label: String(v.label || `变体${i + 1}`).trim().slice(0, 12),
+    scenario: String(v.scenario || scenario).trim().slice(0, 200),
+  }));
+}
+
+/** 单个变体：只问 Jev 一道选择题 */
+async function jevChoose(scenario, options) {
+  const resp = await jevQuery(buildState(scenario, options), { pick: pickQuestion(options) });
+  return normalizePick(resp.answers?.pick, options);
 }
 
 /* ---------------- 演示模式（未配置 key） ---------------- */
@@ -367,6 +426,33 @@ function mockDecide(options) {
     model: 'jev-demo（未配置 TYPESAFE_API_KEY）',
     usage: null,
   };
+}
+
+/** 演示模式的压力变体（按场景长度轮转模板） */
+const MOCK_VARIANTS = [
+  { label: '预算减半', suffix: '（压力条件：可用资金只剩一半）' },
+  { label: '时间收紧', suffix: '（压力条件：必须在三个月内做出决定并执行）' },
+  { label: '有人同行', suffix: '（压力条件：有一位完全信赖的伙伴愿意同行）' },
+  { label: '家人反对', suffix: '（压力条件：最亲近的家人明确反对你的首选）' },
+  { label: '经济下行', suffix: '（压力条件：未来两年大环境明显变差）' },
+];
+
+function mockStress(scenario, options, originalChoice) {
+  const offset = scenario.length % MOCK_VARIANTS.length;
+  const variants = [0, 1, 2].map((i) => {
+    const t = MOCK_VARIANTS[(offset + i) % MOCK_VARIANTS.length];
+    return { label: t.label, scenario: scenario + t.suffix };
+  });
+  return variants.map((v) => {
+    const pick = mockDecide(options);
+    return {
+      ...v,
+      choice: pick.choice,
+      probabilities: pick.probabilities,
+      flipped: pick.choice !== originalChoice,
+      originalProb: pick.probabilities[originalChoice] || 0,
+    };
+  });
 }
 
 /* ---------------- 静态文件 ---------------- */
@@ -533,8 +619,59 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { demo, result, historyId });
     }
 
-    /* ================= 历史记录（需登录） ================= */
+    /* POST /api/stress {scenario, options[], choice} → {demo, variants[]}
+       压力测试：LLM 生成 3 个场景变体，每个变体让 Jev 复裁一次，看选择是否翻转 */
+    if (req.method === 'POST' && url.pathname === '/api/stress') {
+      const cfg = getConfig();
+      const body = JSON.parse((await readBody(req)) || '{}');
+      let scenario = String(body.scenario || '').trim();
+      const originalChoice = String(body.choice || '').trim();
+      const raw = Array.isArray(body.options) ? body.options : [];
+      const options = raw
+        .filter((o) => o && typeof o.title === 'string' && o.title.trim())
+        .slice(0, 6)
+        .map((o, i) => ({
+          id: /^[A-F]$/.test(String(o.id)) ? String(o.id) : 'ABCDE'[i] || String(i + 1),
+          title: String(o.title).trim().slice(0, 24),
+          description: String(o.description || '').trim().slice(0, 120),
+          risk: String(o.risk || '').trim().slice(0, 80),
+        }));
+      if (!scenario) return sendJSON(res, 400, { error: '缺少场景描述' });
+      if (options.length < 2) return sendJSON(res, 400, { error: '至少需要两个选项' });
+      if (!options.some((o) => o.id === originalChoice)) {
+        return sendJSON(res, 400, { error: '缺少原始裁定结果' });
+      }
 
+      const guestDemoFull = !user ? matchDemoScenario(scenario) : null;
+      if (!user && !guestDemoFull) {
+        return sendJSON(res, 401, { error: '注册登录后，才能输入自己的场景调用真实模型' });
+      }
+      if (guestDemoFull) scenario = guestDemoFull;
+
+      // 需要同时有 LLM（出变体）和 Jev（复裁），缺一就走演示
+      if (!cfg.LLM_KEY || !cfg.JEV_KEY || guestDemoFull) {
+        return sendJSON(res, 200, { demo: true, variants: mockStress(scenario, options, originalChoice) });
+      }
+
+      const variants = await llmGenerateVariants(scenario);
+      // 三个变体并行复裁（Jev 便宜快速，放心并发）
+      const results = await Promise.all(
+        variants.map(async (v) => {
+          const pick = await jevChoose(v.scenario, options);
+          return {
+            label: v.label,
+            scenario: v.scenario,
+            choice: pick.choice,
+            probabilities: pick.probabilities,
+            flipped: pick.choice !== originalChoice,
+            originalProb: pick.probabilities[originalChoice] || 0,
+          };
+        })
+      );
+      return sendJSON(res, 200, { demo: false, variants: results });
+    }
+
+    /* ================= 历史记录（需登录） ================= */
     /* GET /api/history?limit&offset */
     if (req.method === 'GET' && url.pathname === '/api/history') {
       if (!user) return sendJSON(res, 401, { error: '请先登录' });

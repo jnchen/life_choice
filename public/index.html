@@ -69,8 +69,21 @@
 
       <div class="result-actions">
         <button id="btnRedecide" class="btn" type="button">🎴 再掷一次</button>
+        <button id="btnStress" class="btn" type="button">🔬 压力测试</button>
+        <button id="btnCapsule" class="btn btn-fate" type="button">🏺 命运胶囊</button>
         <button id="btnReset" class="btn btn-ghost" type="button">🔄 换个场景</button>
       </div>
+    </section>
+
+    <!-- 第四步：决策压力测试 -->
+    <section id="stepStress" class="card hidden">
+      <div class="step-head">
+        <div class="step-title">🔬 决策压力测试</div>
+        <span id="stressDemo" class="demo-flag hidden">演示数据</span>
+      </div>
+      <p class="stress-intro" id="stressIntro"></p>
+      <div id="stressList" class="stress-list"></div>
+      <div id="stressVerdict" class="stress-verdict"></div>
     </section>
 
     <p class="error-line hidden" id="errorLine" role="alert"></p>
@@ -127,6 +140,23 @@
       <button class="btn btn-sm" id="btnHistoryMore" type="button">加载更多</button>
     </div>
   </div>
+  <!-- 命运胶囊弹窗 -->
+  <div id="capsuleModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="capsuleTitle">
+    <div class="modal-card capsule-card">
+      <div class="modal-head">
+        <div class="modal-title" id="capsuleTitle">🏺 命运胶囊</div>
+        <button class="modal-x" id="btnCapsuleClose" type="button" aria-label="关闭">✕</button>
+      </div>
+      <div class="capsule-preview">
+        <canvas id="capsuleCanvas" width="1000" height="1400"></canvas>
+      </div>
+      <div class="capsule-actions">
+        <button class="btn btn-fate" id="btnCapsuleDownload" type="button">⬇️ 下载 PNG</button>
+        <button class="btn" id="btnCapsuleCopy" type="button">📋 复制分享文案</button>
+      </div>
+    </div>
+  </div>
+
   <div id="backdrop" class="backdrop hidden"></div>
 
   <script src="app.js"></script>

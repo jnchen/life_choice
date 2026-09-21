@@ -14,8 +14,15 @@ const els = {
   btnDecide: $('#btnDecide'),
   btnRedecide: $('#btnRedecide'),
   btnReset: $('#btnReset'),
+  btnStress: $('#btnStress'),
+  btnCapsule: $('#btnCapsule'),
   stepOptions: $('#stepOptions'),
   stepResult: $('#stepResult'),
+  stepStress: $('#stepStress'),
+  stressIntro: $('#stressIntro'),
+  stressList: $('#stressList'),
+  stressVerdict: $('#stressVerdict'),
+  stressDemo: $('#stressDemo'),
   optionsGrid: $('#optionsGrid'),
   verdictTitle: $('#verdictTitle'),
   verdictDesc: $('#verdictDesc'),
@@ -49,11 +56,18 @@ const els = {
   btnHistoryClose: $('#btnHistoryClose'),
   btnHistoryClear: $('#btnHistoryClear'),
   btnHistoryMore: $('#btnHistoryMore'),
+  // 命运胶囊
+  capsuleModal: $('#capsuleModal'),
+  capsuleCanvas: $('#capsuleCanvas'),
+  btnCapsuleClose: $('#btnCapsuleClose'),
+  btnCapsuleDownload: $('#btnCapsuleDownload'),
+  btnCapsuleCopy: $('#btnCapsuleCopy'),
 };
 
 const state = {
   scenario: '',
   options: [], // [{id,title,description,risk}]
+  result: null, // 最近一次裁定结果
   user: null,
   authMode: 'login',
   demoScenarios: [],
@@ -337,6 +351,8 @@ function gutBadgeText(p) {
 
 function renderResult(data) {
   const r = data.result;
+  state.result = r;
+  hide(els.stepStress); // 新裁定后旧的压力测试作废
   const opt = state.options.find((o) => o.id === r.choice) || state.options[0];
 
   els.verdictTitle.textContent = opt.title;
@@ -445,6 +461,352 @@ function renderResult(data) {
     parts.push(`输入 ${r.usage.input_tokens} tok / 输出 ${r.usage.output_tokens ?? 0} tok`);
   }
   els.meta.textContent = parts.join(' · ');
+}
+
+/* ---------------- 决策压力测试 ---------------- */
+
+async function runStress() {
+  if (!state.result || state.stressing) return;
+  state.stressing = true;
+  setLoading(els.btnStress, true, '🔬 测试中…');
+  hide(els.errorLine);
+
+  els.stressList.textContent = '';
+  els.stressVerdict.textContent = '';
+  els.stressDemo.classList.add('hidden');
+  els.stressIntro.textContent = 'Jev 正在把场景改写成 3 个压力变体，逐一复裁……';
+  show(els.stepStress);
+  scrollToEl(els.stepStress);
+
+  try {
+    const data = await api('/api/stress', {
+      scenario: state.scenario,
+      options: state.options,
+      choice: state.result.choice,
+    });
+    renderStress(data);
+  } catch (err) {
+    hide(els.stepStress);
+    if (/登录|注册/.test(err.message)) openAuth('login');
+    showError(err.message);
+  } finally {
+    setLoading(els.btnStress, false);
+    state.stressing = false;
+  }
+}
+
+function renderStress(data) {
+  const original = state.options.find((o) => o.id === state.result.choice);
+  const origLabel = `${original.id} ${original.title}`;
+  els.stressIntro.textContent = `原裁定是「${origLabel}」。Jev 把场景改写成 ${data.variants.length} 个压力变体，逐一复裁，看这个选择扛不扛得住条件变化：`;
+  els.stressDemo.classList.toggle('hidden', !data.demo);
+
+  els.stressList.textContent = '';
+  let flips = 0;
+  for (const v of data.variants) {
+    if (v.flipped) flips += 1;
+    const newOpt = state.options.find((o) => o.id === v.choice);
+
+    const card = document.createElement('div');
+    card.className = `variant-card ${v.flipped ? 'flipped' : 'held'}`;
+
+    const head = document.createElement('div');
+    head.className = 'variant-head';
+    const label = document.createElement('span');
+    label.className = 'variant-label';
+    label.textContent = v.label;
+    const tag = document.createElement('span');
+    tag.className = `variant-tag ${v.flipped ? 'flip' : 'hold'}`;
+    tag.textContent = v.flipped ? '⚡ 翻转了' : '🛡 守住了';
+    head.append(label, tag);
+
+    const sc = document.createElement('div');
+    sc.className = 'variant-scenario';
+    sc.textContent = v.scenario;
+
+    const resLine = document.createElement('div');
+    resLine.className = 'variant-result';
+    if (v.flipped) {
+      resLine.textContent = 'Jev 改选 ';
+      const b = document.createElement('b');
+      b.textContent = newOpt ? `${newOpt.id} ${newOpt.title}` : v.choice;
+      resLine.append(b);
+    } else {
+      resLine.textContent = 'Jev 仍选 ';
+      const b = document.createElement('b');
+      b.textContent = origLabel;
+      resLine.append(b);
+    }
+
+    const track = document.createElement('div');
+    track.className = 'variant-track';
+    const fill = document.createElement('div');
+    fill.className = 'variant-fill';
+    track.append(fill);
+    const probLabel = document.createElement('div');
+    probLabel.className = 'variant-prob-label';
+    probLabel.textContent = `此变体下原选项的存活概率：${fmtPct(v.originalProb)}`;
+
+    card.append(head, sc, resLine, track, probLabel);
+    els.stressList.append(card);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      fill.style.width = `${Math.min(100, v.originalProb * 100)}%`;
+    }));
+  }
+
+  // 稳健性结论
+  const total = data.variants.length;
+  const verdict = document.createElement('div');
+  if (flips === 0) {
+    verdict.className = 'stress-verdict solid';
+    verdict.textContent = `结论：${total} 个压力条件全部守住 —— 这个决定相当稳健，可以放心推进。`;
+  } else if (flips === total) {
+    verdict.className = 'stress-verdict fragile';
+    verdict.textContent = `结论：${total} 个压力条件全部翻转 —— 这个选择极其脆弱，几乎任何风吹草动都会改变答案，强烈建议重新评估。`;
+  } else {
+    verdict.className = 'stress-verdict';
+    verdict.textContent = `结论：${total} 个压力条件中有 ${flips} 个翻转 —— 决定部分稳健。翻转发生的地方，就是你决策的真正支点，值得重点想想。`;
+  }
+  els.stressVerdict.textContent = '';
+  els.stressVerdict.append(verdict);
+}
+
+/* ---------------- 命运胶囊（Canvas 分享卡片） ---------------- */
+
+function openCapsule() {
+  if (!state.result) return;
+  drawCapsule();
+  els.capsuleModal.classList.remove('hidden');
+  els.backdrop.classList.remove('hidden');
+}
+
+function closeCapsule() {
+  els.capsuleModal.classList.add('hidden');
+  els.backdrop.classList.add('hidden');
+}
+
+/** 中文按字换行 */
+function wrapCanvasText(ctx, text, maxWidth) {
+  const lines = [];
+  let line = '';
+  for (const ch of String(text)) {
+    if (ch === '\n') { lines.push(line); line = ''; continue; }
+    if (ctx.measureText(line + ch).width > maxWidth && line) {
+      lines.push(line);
+      line = ch;
+    } else {
+      line += ch;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawCapsule() {
+  const canvas = els.capsuleCanvas;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;   // 1000
+  const H = canvas.height;  // 1400
+  const r = state.result;
+  const opt = state.options.find((o) => o.id === r.choice) || state.options[0];
+
+  const INK = '#f5f3ff';
+  const INK2 = '#c9c4e4';
+  const MUTED = '#8f89ad';
+  const GOLD = '#f5c66b';
+  const SERIES = '#9085e9';
+
+  // 背景
+  const bg = ctx.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, '#1a1630');
+  bg.addColorStop(1, '#0d0b16');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+  // 顶部光晕
+  const glow = ctx.createRadialGradient(W / 2, -100, 50, W / 2, -100, 700);
+  glow.addColorStop(0, 'rgba(144,133,233,0.35)');
+  glow.addColorStop(1, 'rgba(144,133,233,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, W, 700);
+
+  ctx.textBaseline = 'alphabetic';
+  const FONT = 'system-ui, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+  let y = 92;
+
+  // 标题
+  ctx.textAlign = 'center';
+  ctx.fillStyle = INK;
+  ctx.font = `700 44px ${FONT}`;
+  ctx.fillText('人生选择器 · 命运胶囊', W / 2, y);
+
+  // 日期
+  y += 44;
+  ctx.fillStyle = MUTED;
+  ctx.font = `400 24px ${FONT}`;
+  const d = new Date();
+  ctx.fillText(`${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日`, W / 2, y);
+
+  // 场景卡
+  y += 56;
+  ctx.textAlign = 'left';
+  ctx.font = `400 28px ${FONT}`;
+  const scLines = wrapCanvasText(ctx, state.scenario, W - 160).slice(0, 5);
+  const scH = 40 + scLines.length * 44 + 30;
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  roundRect(ctx, 60, y, W - 120, scH, 20);
+  ctx.fill();
+  ctx.fillStyle = MUTED;
+  ctx.font = `600 22px ${FONT}`;
+  ctx.fillText('📝 我的人生场景', 92, y + 48);
+  ctx.fillStyle = INK2;
+  ctx.font = `400 28px ${FONT}`;
+  scLines.forEach((line, i) => ctx.fillText(line, 92, y + 96 + i * 44));
+
+  // 分割线
+  y += scH + 54;
+  const rule = ctx.createLinearGradient(80, 0, W - 80, 0);
+  rule.addColorStop(0, 'rgba(245,198,107,0)');
+  rule.addColorStop(0.5, 'rgba(245,198,107,0.55)');
+  rule.addColorStop(1, 'rgba(245,198,107,0)');
+  ctx.fillStyle = rule;
+  ctx.fillRect(80, y, W - 160, 2);
+
+  // 裁定标签
+  y += 64;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = MUTED;
+  ctx.font = `400 26px ${FONT}`;
+  ctx.fillText('—  J e v  的  裁  定  —', W / 2, y);
+
+  // 中签标题（金色大字）
+  y += 88;
+  ctx.fillStyle = GOLD;
+  ctx.font = `800 76px ${FONT}`;
+  ctx.shadowColor = 'rgba(245,198,107,0.35)';
+  ctx.shadowBlur = 30;
+  ctx.fillText(opt.title, W / 2, y);
+  ctx.shadowBlur = 0;
+
+  // 描述
+  y += 52;
+  ctx.fillStyle = INK2;
+  ctx.font = `400 27px ${FONT}`;
+  const descLines = wrapCanvasText(ctx, opt.description || '', W - 200).slice(0, 2);
+  descLines.forEach((line, i) => ctx.fillText(line, W / 2, y + i * 40));
+  y += descLines.length * 40;
+
+  // 徽章行
+  y += 30;
+  ctx.font = `600 23px ${FONT}`;
+  const badgeTexts = [];
+  if (r.confidence != null) badgeTexts.push(`置信度 ${Math.round(r.confidence * 100)}%`);
+  if (r.importance) badgeTexts.push(r.importance.label);
+  if (r.gutFeeling != null) badgeTexts.push(r.gutFeeling >= 0.6 ? '你心里早有答案' : r.gutFeeling <= 0.4 ? '你还没想清楚' : 'Jev 看不透你');
+  const badgeStr = badgeTexts.join('   ·   ');
+  ctx.fillStyle = '#c4b8ff';
+  ctx.fillText(badgeStr, W / 2, y);
+
+  // 概率条标题
+  y += 66;
+  ctx.textAlign = 'left';
+  ctx.fillStyle = INK;
+  ctx.font = `700 26px ${FONT}`;
+  ctx.fillText('各选项命运倾向度', 60, y);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = MUTED;
+  ctx.font = `400 21px ${FONT}`;
+  ctx.fillText('Jev 给出的概率分布', W - 60, y);
+
+  // 概率条（按概率降序）
+  y += 30;
+  const sorted = [...state.options].sort((a, b) => (r.probabilities[b.id] || 0) - (r.probabilities[a.id] || 0));
+  const BAR_X = 60;
+  const BAR_W = W - 120;
+  const BAR_H = 20;
+  for (const o of sorted) {
+    const p = r.probabilities[o.id] || 0;
+    const isWinner = o.id === r.choice;
+
+    // 标签行
+    ctx.textAlign = 'left';
+    ctx.font = `600 25px ${FONT}`;
+    ctx.fillStyle = isWinner ? GOLD : INK;
+    ctx.fillText(`${o.id} ${o.title}${isWinner ? '  ✓' : ''}`, BAR_X, y + 26);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = INK2;
+    ctx.font = `500 24px ${FONT}`;
+    ctx.fillText(fmtPct(p), BAR_X + BAR_W, y + 26);
+
+    // 轨道 + 填充
+    const ty = y + 42;
+    ctx.fillStyle = 'rgba(255,255,255,0.07)';
+    roundRect(ctx, BAR_X, ty, BAR_W, BAR_H, 10);
+    ctx.fill();
+    const fw = Math.max(BAR_H, BAR_W * Math.min(1, p));
+    const fg = ctx.createLinearGradient(BAR_X, 0, BAR_X + fw, 0);
+    fg.addColorStop(0, '#7a6ee0');
+    fg.addColorStop(1, SERIES);
+    ctx.fillStyle = fg;
+    roundRect(ctx, BAR_X, ty, fw, BAR_H, 10);
+    ctx.fill();
+    if (isWinner) {
+      ctx.strokeStyle = GOLD;
+      ctx.lineWidth = 3;
+      roundRect(ctx, BAR_X - 2, ty - 2, BAR_W + 4, BAR_H + 4, 12);
+      ctx.stroke();
+    }
+    y += 96;
+  }
+
+  // 页脚
+  ctx.textAlign = 'center';
+  ctx.fillStyle = MUTED;
+  ctx.font = `400 21px ${FONT}`;
+  ctx.fillText('LLM 出题 · Jev（TypeSafe AI System One）执签', W / 2, H - 76);
+  ctx.fillText('仅供参考，人生自负 😉', W / 2, H - 42);
+}
+
+function downloadCapsule() {
+  els.capsuleCanvas.toBlob((blob) => {
+    if (!blob) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `命运胶囊-${Date.now()}.png`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }, 'image/png');
+}
+
+async function copyCapsuleText() {
+  const r = state.result;
+  const opt = state.options.find((o) => o.id === r.choice) || state.options[0];
+  const lines = [
+    '🏺 我的命运胶囊',
+    `场景：${state.scenario}`,
+    `Jev 的裁定：${opt.title} —— ${opt.description}`,
+    '概率分布：' + state.options
+      .map((o) => `${o.title} ${fmtPct(r.probabilities[o.id] || 0)}`)
+      .join(' / '),
+    r.confidence != null ? `置信度 ${Math.round(r.confidence * 100)}%` : '',
+    '—— 人生选择器（LLM 出题 · Jev 执签，仅供参考，人生自负）',
+  ].filter(Boolean).join('\n');
+  try {
+    await navigator.clipboard.writeText(lines);
+    els.btnCapsuleCopy.textContent = '✅ 已复制';
+    setTimeout(() => { els.btnCapsuleCopy.textContent = '📋 复制分享文案'; }, 1500);
+  } catch {
+    showError('复制失败，浏览器未授权剪贴板');
+  }
 }
 
 /* ---------------- 历史记录 ---------------- */
@@ -635,9 +997,16 @@ els.btnGenerate.addEventListener('click', generateOptions);
 els.btnRegen.addEventListener('click', generateOptions);
 els.btnDecide.addEventListener('click', decide);
 els.btnRedecide.addEventListener('click', decide);
+els.btnStress.addEventListener('click', runStress);
+els.btnCapsule.addEventListener('click', openCapsule);
+els.btnCapsuleClose.addEventListener('click', closeCapsule);
+els.btnCapsuleDownload.addEventListener('click', downloadCapsule);
+els.btnCapsuleCopy.addEventListener('click', copyCapsuleText);
 els.btnReset.addEventListener('click', () => {
   hide(els.stepOptions);
   hide(els.stepResult);
+  hide(els.stepStress);
+  state.result = null;
   if (state.user) {
     els.scenario.value = '';
     els.scenario.focus();
@@ -669,7 +1038,7 @@ els.scenario.addEventListener('keydown', (e) => {
 els.btnAuth.addEventListener('click', () => openAuth('login'));
 els.btnLogout.addEventListener('click', logout);
 els.btnAuthClose.addEventListener('click', closeAuth);
-els.backdrop.addEventListener('click', () => { closeAuth(); closeHistory(); });
+els.backdrop.addEventListener('click', () => { closeAuth(); closeHistory(); closeCapsule(); });
 els.tabLogin.addEventListener('click', () => switchAuthTab('login'));
 els.tabRegister.addEventListener('click', () => switchAuthTab('register'));
 els.authForm.addEventListener('submit', submitAuth);
@@ -682,8 +1051,9 @@ els.btnHistoryMore.addEventListener('click', () => loadHistory(true));
 
 init();
 
-/* 自动演示模式：访问 /?demo=1 自动填入示例场景并走完全流程 */
-if (new URLSearchParams(location.search).get('demo') === '1') {
+/* 自动演示模式：访问 /?demo=1 自动填入示例场景并走完全流程；&capsule=1 再自动打开命运胶囊 */
+const qs = new URLSearchParams(location.search);
+if (qs.get('demo') === '1') {
   (async () => {
     await sleep(400);
     els.scenario.value = state.demoScenarios[0] || '毕业三年，是继续在大厂卷，还是回老家开咖啡店？';
@@ -691,5 +1061,8 @@ if (new URLSearchParams(location.search).get('demo') === '1') {
     await generateOptions();
     await sleep(600);
     if (state.options.length >= 2) await decide();
+    await sleep(400);
+    if (state.result) await runStress();
+    if (qs.get('capsule') === '1' && state.result) openCapsule();
   })();
 }

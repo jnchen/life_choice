@@ -363,11 +363,99 @@ textarea::placeholder { color: var(--muted); }
 }
 
 .result-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 12px;
   margin-top: 18px;
 }
-.result-actions .btn { flex: 1; }
+
+/* ---------------- 压力测试 ---------------- */
+.stress-intro { color: var(--ink-2); font-size: 13.5px; margin-bottom: 16px; }
+.stress-intro b { color: var(--gold); }
+
+.stress-list { display: flex; flex-direction: column; gap: 12px; }
+
+.variant-card {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 14px;
+  padding: 14px 16px 12px;
+}
+.variant-card.flipped { border-color: rgba(255, 156, 156, 0.35); }
+.variant-card.held { border-color: rgba(144, 133, 233, 0.35); }
+
+.variant-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.variant-label { font-weight: 700; font-size: 14.5px; }
+.variant-tag {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+.variant-tag.flip { color: #ffb0b0; background: rgba(255, 120, 120, 0.12); border: 1px solid rgba(255, 120, 120, 0.35); }
+.variant-tag.hold { color: #c4b8ff; background: rgba(144, 133, 233, 0.12); border: 1px solid rgba(144, 133, 233, 0.35); }
+
+.variant-scenario { color: var(--muted); font-size: 12.5px; margin-bottom: 8px; }
+.variant-result { font-size: 13.5px; color: var(--ink-2); margin-bottom: 8px; }
+.variant-result b { color: var(--ink); }
+
+.variant-track {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+.variant-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #7a6ee0, var(--series));
+  border-radius: 2px 4px 4px 2px;
+  transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.variant-prob-label { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+.stress-verdict {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.stress-verdict.solid { border-color: rgba(144, 133, 233, 0.4); }
+.stress-verdict.fragile { border-color: rgba(255, 156, 156, 0.4); }
+.stress-verdict b { color: var(--gold); }
+
+/* ---------------- 命运胶囊 ---------------- */
+.capsule-card { max-width: 460px; }
+.capsule-preview {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+.capsule-preview canvas {
+  width: 100%;
+  max-width: 340px;
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.capsule-actions { display: flex; gap: 10px; }
+.capsule-actions .btn { flex: 1; }
+
+@media (max-width: 560px) {
+  .card { padding: 20px 16px; }
+  .result-actions { grid-template-columns: 1fr; }
+}
 
 /* ---------------- 其他 ---------------- */
 .error-line {
@@ -642,7 +730,6 @@ textarea:disabled { opacity: 0.6; cursor: not-allowed; }
 
 @media (max-width: 560px) {
   .card { padding: 20px 16px; }
-  .result-actions { flex-direction: column; }
 }
 
 @media (prefers-reduced-motion: reduce) {
