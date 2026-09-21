@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>人生选择器 · Jev 执签</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="orb orb-a" aria-hidden="true"></div>
+  <div class="orb orb-b" aria-hidden="true"></div>
+
+  <main class="container">
+    <div class="topbar">
+      <span class="topbar-user hidden" id="userBadge"></span>
+      <button class="btn btn-ghost btn-sm hidden" id="btnHistory" type="button">🕘 历史记录</button>
+      <button class="btn btn-sm hidden" id="btnAuth" type="button">登录 / 注册</button>
+      <button class="btn btn-ghost btn-sm hidden" id="btnLogout" type="button">退出</button>
+    </div>
+
+    <header class="site-header">
+      <h1>人生选择器</h1>
+      <p class="subtitle">描述你的两难，AI 出题，<b>Jev</b> 执签</p>
+      <div id="modeBanner" class="mode-banner hidden"></div>
+    </header>
+
+    <!-- 第一步：输入场景 -->
+    <section id="stepScenario" class="card">
+      <div class="scenario-head">
+        <label class="field-label" for="scenario">📝 你的人生场景</label>
+        <span id="gateHint" class="gate-hint"></span>
+      </div>
+      <textarea
+        id="scenario"
+        rows="4"
+        maxlength="1000"
+        placeholder="例如：毕业三年了，手里有点积蓄，是继续在大厂卷，还是回老家开一家咖啡店？"
+      ></textarea>
+      <div class="chips" id="exampleChips" aria-label="快速示例"></div>
+      <button id="btnGenerate" class="btn btn-primary btn-lg">✨ 生成选项</button>
+    </section>
+
+    <!-- 第二步：选项卡片 -->
+    <section id="stepOptions" class="card hidden">
+      <div class="step-head">
+        <div class="step-title">🗺️ AI 为你拟出的岔路</div>
+        <button id="btnRegen" class="btn btn-ghost btn-sm" type="button">换一批</button>
+      </div>
+      <div id="optionsGrid" class="options-grid" aria-live="polite"></div>
+      <button id="btnDecide" class="btn btn-fate btn-lg">🎲 让 Jev 替我决定</button>
+    </section>
+
+    <!-- 第三步：裁定结果 -->
+    <section id="stepResult" class="card hidden" aria-live="assertive">
+      <div class="verdict-rule" aria-hidden="true"></div>
+      <div class="verdict-label">— Jev 的裁定 —</div>
+      <div id="verdictTitle" class="verdict-title"></div>
+      <div id="verdictDesc" class="verdict-desc"></div>
+      <div id="badges" class="badges"></div>
+
+      <div class="prob-head">
+        <div class="prob-title">各选项命运倾向度</div>
+        <div class="prob-hint">Jev 给出的概率分布</div>
+      </div>
+      <div id="probBars" class="prob-bars"></div>
+      <table id="probTable" class="sr-only"><caption>Jev 概率分布表</caption></table>
+
+      <div id="meta" class="meta"></div>
+
+      <div class="result-actions">
+        <button id="btnRedecide" class="btn" type="button">🎴 再掷一次</button>
+        <button id="btnReset" class="btn btn-ghost" type="button">🔄 换个场景</button>
+      </div>
+    </section>
+
+    <p class="error-line hidden" id="errorLine" role="alert"></p>
+  </main>
+
+  <footer class="site-footer">
+    LLM 出题 · <a href="https://typesafe.ai" target="_blank" rel="noopener">Jev（TypeSafe AI System One）</a>执签 · 仅供参考，人生自负 😉
+  </footer>
+
+  <div id="tooltip" class="tooltip hidden" role="tooltip"></div>
+
+  <!-- 登录 / 注册弹窗 -->
+  <div id="authModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div class="modal-title" id="authTitle">🔑 登录 / 注册</div>
+        <button class="modal-x" id="btnAuthClose" type="button" aria-label="关闭">✕</button>
+      </div>
+      <div class="tabs" role="tablist">
+        <button class="tab active" id="tabLogin" type="button" role="tab">登录</button>
+        <button class="tab" id="tabRegister" type="button" role="tab">注册</button>
+      </div>
+      <form id="authForm" class="auth-form" novalidate>
+        <label class="auth-field" id="usernameField">
+          <span>昵称</span>
+          <input id="authUsername" type="text" maxlength="24" autocomplete="nickname" placeholder="怎么称呼你">
+        </label>
+        <label class="auth-field">
+          <span>邮箱</span>
+          <input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com" required>
+        </label>
+        <label class="auth-field">
+          <span>密码</span>
+          <input id="authPassword" type="password" autocomplete="current-password" placeholder="至少 6 位" required>
+        </label>
+        <p class="auth-error hidden" id="authError" role="alert"></p>
+        <button class="btn btn-primary btn-lg" id="btnAuthSubmit" type="submit">登录</button>
+      </form>
+      <p class="auth-note">登录后可输入自己的场景调用真实模型，并保存历史记录。</p>
+    </div>
+  </div>
+
+  <!-- 历史记录抽屉 -->
+  <div id="historyDrawer" class="drawer hidden" role="dialog" aria-label="历史记录">
+    <div class="drawer-head">
+      <div class="modal-title">🕘 历史记录</div>
+      <div class="drawer-actions">
+        <button class="btn btn-ghost btn-sm" id="btnHistoryClear" type="button">清空</button>
+        <button class="modal-x" id="btnHistoryClose" type="button" aria-label="关闭">✕</button>
+      </div>
+    </div>
+    <div id="historyList" class="drawer-list"></div>
+    <div class="drawer-foot">
+      <button class="btn btn-sm" id="btnHistoryMore" type="button">加载更多</button>
+    </div>
+  </div>
+  <div id="backdrop" class="backdrop hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

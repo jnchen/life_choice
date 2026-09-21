@@ -1,0 +1,117 @@
+# 🎲 人生选择器 · Life Chooser
+
+> 描述你的人生两难 → **LLM** 帮你拟出几条岔路 → **Jev**（TypeSafe AI 的 System One 模型）替你执签，并给出每个选项的概率分布。
+
+## 工作原理
+
+```
+用户输入场景（例：该考研还是去工作？）
+        │
+        ▼
+┌─────────────────────┐   POST /api/options    ┌──────────────────────┐
+│  LLM（OpenAI 兼容）  │ ─────────────────────► │  生成 3~5 个选项卡片   │
+│  DeepSeek/Kimi/通义… │                        │  标题+描述+风险        │
+└─────────────────────┘                        └──────────┬───────────┘
+                                                          │ 用户点击「让 Jev 替我决定」
+                                                          ▼
+┌─────────────────────┐   POST /api/decide     ┌──────────────────────┐
+│  Jev (System One)   │ ◄───────────────────── │  state + questions    │
+│  api.typesafe.ai    │                        └──────────────────────┘
+│  /v1/systemone      │ ───────► 选中选项 + 各选项概率分布 + 置信度
+└─────────────────────┘           + 「你心里是否早有答案」(noul)
+                                  + 「这个决定有多重要」(score)
+```
+
+一次调用同时问了 Jev 三个问题，正好覆盖它的三种问题类型：
+
+| 问题 | 类型 | 用途 |
+|------|------|------|
+| `pick` | `choice` | 从 A/B/C/D… 中选中一项，返回各项概率 + 置信度 |
+| `gut_feeling` | `noul` | 判断「你心里是不是其实早有答案」（0~1 概率） |
+| `importance` | `score` | 判断这个决定对人生的影响等级（4 级） |
+
+## 快速开始
+
+```bash
+# 1. 安装：零依赖，Node.js 22+（用到 node:sqlite 内置数据库；18+ 可跑但需去掉 db.js）
+node -v
+
+# 2. 配置（可选，不配置则进入演示模式；改完 .env 立即生效，无需重启）
+cp .env.example .env   # 填入 OPENAI_API_KEY / TYPESAFE_API_KEY，BASE_URL 和 MODEL 按服务商选择
+
+# 3. 运行
+node server.js         # 或 npm start
+# 打开 http://localhost:3000
+```
+
+## 使用方式
+
+| 角色 | 能做什么 |
+|------|----------|
+| **游客** | 只能点 4 个内置示例场景体验（演示模式，不调用真实模型） |
+| **登录用户** | 输入任意场景调用真实 LLM + Jev；每次裁定自动存入历史记录，可查看/展开/删除/清空 |
+
+- 注册只需邮箱 + 昵称 + 密码（≥6 位），登录态用 HttpOnly Cookie 保存 14 天。
+- 数据存在本地 `data.db`（SQLite，零配置），密码用 scrypt 加盐哈希，不落明文。
+
+## 配置说明（.env）
+
+### LLM —— 生成选项（OpenAI 兼容接口）
+
+| 变量 | 说明 |
+|------|------|
+| `OPENAI_BASE_URL` | 兼容接口地址，默认 DeepSeek（`https://api.deepseek.com/v1`） |
+| `OPENAI_API_KEY` | 对应服务商的 key |
+| `OPENAI_MODEL` | 模型名，默认 `deepseek-chat` |
+
+常见服务商示例见 `.env.example`（Kimi / 通义 / 智谱 / OpenAI 均可）。
+
+### Jev —— 最终决定（TypeSafe AI System One）
+
+| 变量 | 说明 |
+|------|------|
+| `TYPESAFE_API_KEY` | 在 [console.typesafe.ai/settings/keys](https://console.typesafe.ai/settings/keys) 申请（早期访问需排队） |
+| `TYPESAFE_API_BASE` | 默认 `https://api.typesafe.ai` |
+| `JEV_MODEL` | 默认 `jev-latest`，可固定版本如 `jev-1.13.0` |
+
+计价参考：输入约 $0.042 / 百万 tokens，**输出免费**——一次执签的花费基本可以忽略。
+
+> 💡 两个 key 都可以不填：应用会自动进入**演示模式**（内置示例选项 + 模拟裁定），方便先看效果。
+
+## 安全说明
+
+API Key 只存在于后端 `.env` 中，浏览器永远不会接触 key；前端只与本服务通信：
+`/api/status`、`/api/options`、`/api/decide`。
+
+## 免责声明
+
+Jev 只是概率模型，不是命运。所有裁定仅供娱乐参考，人生请自负 😉
+
+## 目录结构
+
+```
+life_choice/
+├── server.js          # 零依赖 Node 后端（LLM + Jev 代理、鉴权、历史、静态文件、演示模式）
+├── db.js              # 数据层（node:sqlite：用户/会话/历史，scrypt 密码哈希）
+├── public/
+│   ├── index.html     # 单页界面（登录弹窗 + 历史抽屉）
+│   ├── style.css      # 深色「命运占卜」主题（图表色板已通过 dataviz 校验）
+│   └── app.js         # 交互逻辑（轮盘动画、概率条、登录态、历史管理）
+├── .env.example       # 配置模板
+└── package.json
+```
+
+## API 一览
+
+| 方法 | 路径 | 说明 | 鉴权 |
+|------|------|------|------|
+| POST | `/api/auth/register` | 注册并登录 | 否 |
+| POST | `/api/auth/login` | 登录 | 否 |
+| POST | `/api/auth/logout` | 登出 | 是 |
+| GET | `/api/me` | 当前登录用户 | 否 |
+| GET | `/api/status` | 服务状态 + 内置 demo 场景 | 否 |
+| POST | `/api/options` | 生成选项（游客限 demo 场景） | 部分 |
+| POST | `/api/decide` | Jev 执签（登录则写入历史） | 部分 |
+| GET | `/api/history` | 历史列表 | 是 |
+| DELETE | `/api/history/:id` | 删除一条 | 是 |
+| POST | `/api/history/clear` | 清空历史 | 是 |
