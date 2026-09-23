@@ -64,10 +64,26 @@
       </div>
 
       <div class="col-right">
-        <!-- 空态引导 -->
+        <!-- 空态引导：流程预览面板 -->
         <div id="rightEmpty" class="card empty-state">
           <div class="empty-icon">🔮</div>
           <div class="empty-text" id="emptyText">先在左边写下你的场景（或点一个示例），让 AI 帮你拟出几条岔路</div>
+          <div class="empty-preview" aria-hidden="true">
+            <div class="ep-title">接下来这里会发生什么</div>
+            <div class="ep-row"><span class="ep-badge ep-violet">Jev 概率</span>
+              <div class="ep-bars">
+                <div class="ep-bar"><i style="width:62%"></i><span>继续在大厂卷 · 62%</span></div>
+                <div class="ep-bar"><i style="width:27%"></i><span>回老家开咖啡店 · 27%</span></div>
+                <div class="ep-bar"><i style="width:11%"></i><span>先攒钱再辞职 · 11%</span></div>
+              </div>
+            </div>
+            <div class="ep-row"><span class="ep-badge ep-gold">我来选</span>
+              <div class="ep-note">概率只是参考——每张卡片上都有「👉 我选这条」，选哪条由你定</div>
+            </div>
+            <div class="ep-row"><span class="ep-badge ep-violet">推演未来</span>
+              <div class="ep-note">选定后，AI 顺着你的选择头脑风暴第一步，Jev 再给出一年后各走向的概率</div>
+            </div>
+          </div>
         </div>
 
         <!-- 第三步：Jev 概率参考 -->
