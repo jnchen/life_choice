@@ -359,14 +359,8 @@ async function decide() {
     }
     if (apiError) throw apiError;
 
-    // 快速对齐到中签卡片
-    const winnerIdx = cards.findIndex((c) => c.dataset.id === apiResult.result.choice);
-    if (winnerIdx >= 0) {
-      while (idx !== winnerIdx) await spinOnce();
-    }
+    // 轮盘只是等待动画：概率一到就停，不替人落子 —— 选哪条路由你定
     cards.forEach((c) => c.classList.remove('hot'));
-    if (winnerIdx >= 0) cards[winnerIdx].classList.add('winner');
-    await sleep(reducedMotion ? 0 : 450);
 
     renderResult(apiResult);
     show(els.stepResult);
@@ -484,7 +478,7 @@ function renderResult(data) {
     if (isWinner) {
       const badge = document.createElement('span');
       badge.className = 'pick-badge';
-      badge.textContent = '✓ Jev 之选';
+      badge.textContent = 'Jev 概率最高';
       name.append(badge);
     }
 
@@ -501,7 +495,7 @@ function renderResult(data) {
     track.append(fill);
 
     row.append(label, track);
-    row.setAttribute('aria-label', `选项 ${o.id} ${o.title}：概率 ${fmtPct(p)}${isWinner ? '，Jev 选中' : ''}`);
+    row.setAttribute('aria-label', `选项 ${o.id} ${o.title}：概率 ${fmtPct(p)}${isWinner ? '，概率最高' : ''}`);
     bindTooltip(row, () => `${o.title}：${o.description}${o.risk ? `（代价：${o.risk}）` : ''}`);
     els.probBars.append(row);
 
@@ -516,7 +510,7 @@ function renderResult(data) {
   els.probTable.textContent = '';
   els.probTable.append(cap);
   const thead = document.createElement('tr');
-  for (const h of ['选项', '概率', '是否中签']) {
+  for (const h of ['选项', '概率', '是否概率最高']) {
     const th = document.createElement('th');
     th.scope = 'col';
     th.textContent = h;
