@@ -50,6 +50,7 @@ function getConfig() {
 }
 
 const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '0.0.0.0'; // 0.0.0.0 = 监听所有网卡，支持内网访问
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 /** Jev score 问题的有序等级（index 0 = 影响最小） */
@@ -706,15 +707,21 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   db.cleanExpiredSessions();
   const cfg = getConfig();
   const mode = [
     cfg.LLM_KEY ? `LLM=已接入(${cfg.LLM_MODEL})` : 'LLM=演示模式',
     cfg.JEV_KEY ? `Jev=已接入(${cfg.JEV_MODEL})` : 'Jev=演示模式',
   ].join('  ');
+  const os = require('os');
+  const lanIps = Object.values(os.networkInterfaces())
+    .flat()
+    .filter((i) => i && i.family === 'IPv4' && !i.internal)
+    .map((i) => i.address);
   console.log(`\n🎲 人生选择器已启动`);
-  console.log(`   地址   http://localhost:${PORT}`);
+  console.log(`   本机   http://localhost:${PORT}`);
+  for (const ip of lanIps) console.log(`   内网   http://${ip}:${PORT}`);
   console.log(`   模式   ${mode}`);
   console.log(`   提示   编辑 .env 立即生效，无需重启服务\n`);
 });
