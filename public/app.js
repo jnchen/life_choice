@@ -18,6 +18,7 @@ const els = {
   btnCapsule: $('#btnCapsule'),
   supplementInput: $('#supplementInput'),
   btnSupplement: $('#btnSupplement'),
+  suppRegen: $('#suppRegen'),
   roundsTimeline: $('#roundsTimeline'),
   infoHint: $('#infoHint'),
   stepOptions: $('#stepOptions'),
@@ -78,15 +79,32 @@ const state = {
   demoScenarios: [],
 };
 
+/** 补充信息拼接标记（与后端 baseScenario 保持一致） */
+const SUPPLEMENT_MARKER = '当事人后续补充的信息：';
+
 /** 有效场景 = 基础场景 + 历轮补充（喂给 Jev 的完整上下文） */
 function effectiveScenario() {
   if (!state.supplements.length) return state.scenario;
   return [
     state.scenario,
     '',
-    '当事人后续补充的信息：',
+    SUPPLEMENT_MARKER,
     ...state.supplements.map((s, i) => `${i + 1}. ${s.text}`),
   ].join('\n');
+}
+
+/** 把历史记录里存的场景文本拆成 { base, supplements[] }，用于完整展示 */
+function splitScenario(text) {
+  const t = String(text || '');
+  const idx = t.indexOf(SUPPLEMENT_MARKER);
+  if (idx === -1) return { base: t, supplements: [] };
+  const base = t.slice(0, idx).trim();
+  const supplements = t
+    .slice(idx + SUPPLEMENT_MARKER.length)
+    .split('\n')
+    .map((l) => l.replace(/^\s*\d+\s*[.、．]\s*/, '').trim())
+    .filter(Boolean);
+  return { base, supplements };
 }
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -530,7 +548,31 @@ async function supplementAndRedecide() {
   if (!state.result || state.deciding) return;
   state.supplements.push({ text });
   els.supplementInput.value = '';
-  await decide(); // decide 内部会把本轮裁定结果补到时间线上
+  // 勾选了「重新生成选项」→ 带着补充重新出题，再执签；否则沿用原选项直接再裁
+  if (els.suppRegen && els.suppRegen.checked) {
+    await regenerateOptionsAndDecide();
+  } else {
+    await decide(); // decide 内部会把本轮裁定结果补到时间线上
+  }
+}
+
+/** 带着补充信息重新生成选项，然后直接执签 */
+async function regenerateOptionsAndDecide() {
+  setLoading(els.btnSupplement, true, '✨ 带着补充重新出题…');
+  hide(els.errorLine);
+  try {
+    const data = await api('/api/options', { scenario: effectiveScenario() });
+    state.options = data.options;
+    renderOptions();
+    show(els.stepOptions);
+  } catch (err) {
+    if (/登录|注册/.test(err.message)) openAuth('login');
+    showError(err.message);
+    return;
+  } finally {
+    setLoading(els.btnSupplement, false);
+  }
+  await decide();
 }
 
 /* ---------------- 决策压力测试 ---------------- */
@@ -927,6 +969,7 @@ async function loadHistory(append) {
 function renderHistoryItem(item) {
   const r = item.result || {};
   const opt = (item.options || []).find((o) => o.id === r.choice) || {};
+  const { base, supplements } = splitScenario(item.scenario);
 
   const card = document.createElement('div');
   card.className = 'hist-item';
@@ -934,7 +977,7 @@ function renderHistoryItem(item) {
 
   const sc = document.createElement('div');
   sc.className = 'hist-scenario';
-  sc.textContent = item.scenario;
+  sc.textContent = base;
 
   const meta = document.createElement('div');
   meta.className = 'hist-meta';
@@ -944,6 +987,12 @@ function renderHistoryItem(item) {
   choice.className = 'hist-choice';
   choice.textContent = `→ ${opt.title || '—'}`;
   meta.append(time, choice);
+  if (supplements.length) {
+    const supp = document.createElement('span');
+    supp.className = 'hist-supp-count';
+    supp.textContent = `📝 ${supplements.length} 轮补充`;
+    meta.append(supp);
+  }
   if (r.demo) {
     const flag = document.createElement('span');
     flag.className = 'demo-flag';
@@ -980,6 +1029,41 @@ function toggleHistoryDetail(card, item, btn) {
   const detail = document.createElement('div');
   detail.className = 'hist-detail';
   const r = item.result || {};
+
+  // 完整场景 + 历轮补充
+  const { base, supplements } = splitScenario(item.scenario);
+  const scBlock = document.createElement('div');
+  scBlock.className = 'hist-full-scenario';
+  const scLabel = document.createElement('div');
+  scLabel.className = 'hist-detail-label';
+  scLabel.textContent = '场景';
+  const scText = document.createElement('div');
+  scText.className = 'hist-full-text';
+  scText.textContent = base;
+  scBlock.append(scLabel, scText);
+  detail.append(scBlock);
+
+  if (supplements.length) {
+    const suppBlock = document.createElement('div');
+    suppBlock.className = 'hist-supps';
+    const suppLabel = document.createElement('div');
+    suppLabel.className = 'hist-detail-label';
+    suppLabel.textContent = `后续补充（${supplements.length} 轮）`;
+    suppBlock.append(suppLabel);
+    supplements.forEach((s, i) => {
+      const row = document.createElement('div');
+      row.className = 'hist-supp-item';
+      row.textContent = `${i + 1}. ${s}`;
+      suppBlock.append(row);
+    });
+    detail.append(suppBlock);
+  }
+
+  // 概率分布
+  const probLabel = document.createElement('div');
+  probLabel.className = 'hist-detail-label';
+  probLabel.textContent = '本轮裁定';
+  detail.append(probLabel);
   const sorted = [...(item.options || [])].sort((a, b) => (r.probabilities?.[b.id] || 0) - (r.probabilities?.[a.id] || 0));
   for (const o of sorted) {
     const p = r.probabilities?.[o.id] || 0;

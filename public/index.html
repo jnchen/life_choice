@@ -77,7 +77,13 @@
           maxlength="500"
           placeholder="💬 补充点细节（比如预算、家庭情况、内心倾向…），让 Jev 带着新信息再裁一次"
         ></textarea>
-        <button id="btnSupplement" class="btn btn-primary" type="button">🔮 补充后再裁一次</button>
+        <div class="supplement-side">
+          <button id="btnSupplement" class="btn btn-primary" type="button">🔮 补充后再裁一次</button>
+          <label class="supp-regen" title="勾选后：补充信息会一并交给 LLM 重新出题，再由 Jev 执签">
+            <input type="checkbox" id="suppRegen">
+            同时重新生成选项
+          </label>
+        </div>
       </div>
 
       <div class="result-actions">

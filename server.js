@@ -77,6 +77,14 @@ function matchDemoScenario(scenario) {
   return DEMO_LOOKUP.get(String(scenario).trim()) || null;
 }
 
+/** 多轮补充的拼接标记（与前端 effectiveScenario 保持一致） */
+const SUPPLEMENT_MARKER = '当事人后续补充的信息：';
+/** 去掉场景里拼接的补充信息，返回基础场景（游客白名单匹配用） */
+function baseScenario(text) {
+  const idx = String(text).indexOf(SUPPLEMENT_MARKER);
+  return idx === -1 ? String(text).trim() : String(text).slice(0, idx).trim();
+}
+
 /* ---------------- 小工具 ---------------- */
 
 function readBody(req, limit = 64 * 1024) {
@@ -572,7 +580,7 @@ const server = http.createServer(async (req, res) => {
       if (!scenario) return sendJSON(res, 400, { error: '请先描述你的场景' });
       if (scenario.length > 1000) return sendJSON(res, 400, { error: '场景描述太长了（上限 1000 字）' });
 
-      const guestDemoFull = !user ? matchDemoScenario(scenario) : null;
+      const guestDemoFull = !user ? matchDemoScenario(baseScenario(scenario)) : null;
       if (!user && !guestDemoFull) {
         return sendJSON(res, 401, { error: '注册登录后，才能输入自己的场景调用真实模型' });
       }
@@ -606,7 +614,7 @@ const server = http.createServer(async (req, res) => {
       if (scenario.length > 3000) return sendJSON(res, 400, { error: '场景描述太长了（含补充信息上限 3000 字）' });
       if (options.length < 2) return sendJSON(res, 400, { error: '至少需要两个选项才能执签' });
 
-      const guestDemoFull = !user ? matchDemoScenario(scenario) : null;
+      const guestDemoFull = !user ? matchDemoScenario(baseScenario(scenario)) : null;
       if (!user && !guestDemoFull) {
         return sendJSON(res, 401, { error: '注册登录后，才能输入自己的场景调用真实模型' });
       }
@@ -652,7 +660,7 @@ const server = http.createServer(async (req, res) => {
         return sendJSON(res, 400, { error: '缺少原始裁定结果' });
       }
 
-      const guestDemoFull = !user ? matchDemoScenario(scenario) : null;
+      const guestDemoFull = !user ? matchDemoScenario(baseScenario(scenario)) : null;
       if (!user && !guestDemoFull) {
         return sendJSON(res, 401, { error: '注册登录后，才能输入自己的场景调用真实模型' });
       }
