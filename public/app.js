@@ -30,7 +30,9 @@ const els = {
   futureList: $('#futureList'),
   pathDemo: $('#pathDemo'),
   humanPick: $('#humanPick'),
-  humanPickBtns: $('#humanPickBtns'),
+  stepper: $('#stepper'),
+  rightEmpty: $('#rightEmpty'),
+  emptyText: $('#emptyText'),
   stressIntro: $('#stressIntro'),
   stressList: $('#stressList'),
   stressVerdict: $('#stressVerdict'),
@@ -93,6 +95,7 @@ const state = {
   result: null, // 最近一次裁定结果
   humanChoice: null, // 人亲自选定的选项 id
   path: null,        // 「我的路」结果 {path, futures, demo}
+  pathing: false,    // 未来推演请求进行中
   user: null,
   authMode: 'login',
   demoScenarios: [],
@@ -335,6 +338,8 @@ async function generateOptions() {
     state.options = data.options;
     renderOptions();
     show(els.stepOptions);
+    updateStepper();
+    updateRightEmpty();
     scrollToEl(els.stepOptions);
   } catch (err) {
     if (/登录|注册/.test(err.message)) openAuth('login');
@@ -370,7 +375,88 @@ function renderOptions() {
       risk.textContent = `⚠ ${opt.risk}`;
       card.append(risk);
     }
+
+    // 概率出来后显示：内嵌概率条 + 「我选这条」按钮（选择入口就在卡片上）
+    const foot = document.createElement('div');
+    foot.className = 'opt-foot hidden';
+    const probRow = document.createElement('div');
+    probRow.className = 'opt-prob';
+    const track = document.createElement('div');
+    track.className = 'opt-prob-track';
+    const fill = document.createElement('div');
+    fill.className = 'opt-prob-fill';
+    track.append(fill);
+    const pct = document.createElement('span');
+    pct.className = 'opt-prob-val';
+    probRow.append(track, pct);
+    const pickBtn = document.createElement('button');
+    pickBtn.type = 'button';
+    pickBtn.className = 'btn btn-fate opt-pick-btn';
+    pickBtn.textContent = '👉 我选这条';
+    pickBtn.addEventListener('click', () => runPath(opt.id));
+    foot.append(probRow, pickBtn);
+    card.append(foot);
+
     els.optionsGrid.append(card);
+  }
+}
+
+/** 概率出来后：把每个选项的概率条嵌到对应卡片上，并露出「我选这条」 */
+function renderOptionProbs() {
+  const r = state.result;
+  if (!r) return;
+  const topId = r.choice;
+  for (const card of els.optionsGrid.children) {
+    const id = card.dataset.id;
+    const foot = card.querySelector('.opt-foot');
+    if (!foot) continue;
+    const p = r.probabilities[id] || 0;
+    foot.classList.remove('hidden');
+    card.classList.toggle('top', id === topId);
+    card.classList.toggle('chosen', id === state.humanChoice);
+    card.querySelector('.opt-prob-val').textContent = fmtPct(p);
+    const fill = card.querySelector('.opt-prob-fill');
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      fill.style.width = `${Math.min(100, p * 100)}%`;
+    }));
+  }
+}
+
+/** 选定/推演中的卡片状态同步 */
+function updatePickUI() {
+  for (const card of els.optionsGrid.children) {
+    const chosen = card.dataset.id === state.humanChoice;
+    card.classList.toggle('chosen', chosen);
+    const btn = card.querySelector('.opt-pick-btn');
+    if (btn) {
+      btn.disabled = state.pathing;
+      btn.textContent = chosen ? '✓ 我的选择' : '👉 我选这条';
+    }
+  }
+}
+
+/* ---------------- 步骤条 & 右栏空态 ---------------- */
+
+function updateStepper() {
+  const cur = !state.options.length ? 1
+    : !state.result ? 2
+    : !state.humanChoice ? 3
+    : !state.path ? 4
+    : 5;
+  els.stepper.querySelectorAll('.step').forEach((s) => {
+    const n = Number(s.dataset.step);
+    s.classList.toggle('done', n < cur);
+    s.classList.toggle('active', n === cur);
+  });
+}
+
+function updateRightEmpty() {
+  const show = !state.result;
+  els.rightEmpty.classList.toggle('hidden', !show);
+  if (show) {
+    els.emptyText.textContent = state.options.length
+      ? '选项已就位 —— 点左边底部的「🎲 让 Jev 给出概率」'
+      : '先在左边写下你的场景（或点一个示例），让 AI 帮你拟出几条岔路';
   }
 }
 
@@ -596,31 +682,22 @@ function renderResult(data) {
   }
   els.meta.textContent = parts.join(' · ');
 
-  // 人来选：每个选项一个按钮，点了就顺着推演未来
-  renderHumanPick();
+  // 人来选：概率嵌回选项卡片，点卡片上的「我选这条」选定
+  renderOptionProbs();
+  updatePickUI();
+  updateStepper();
+  updateRightEmpty();
 }
 
 /* ---------------- 我的路：人选完 → 头脑风暴 + 未来推演 ---------------- */
-
-function renderHumanPick() {
-  els.humanPickBtns.textContent = '';
-  for (const o of state.options) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = `btn pick-btn${state.humanChoice === o.id ? ' chosen' : ''}`;
-    btn.textContent = `${o.id} ${o.title}`;
-    btn.disabled = state.pathing;
-    btn.addEventListener('click', () => runPath(o.id));
-    els.humanPickBtns.append(btn);
-  }
-}
 
 async function runPath(choiceId) {
   if (!state.result || state.pathing) return;
   state.pathing = true;
   state.humanChoice = choiceId;
   state.path = null;
-  renderHumanPick();
+  updatePickUI();
+  updateStepper();
   hide(els.errorLine);
 
   const opt = state.options.find((o) => o.id === choiceId) || {};
@@ -642,13 +719,14 @@ async function runPath(choiceId) {
     data.futures = (data.futures || []).sort((a, b) => (b.prob || 0) - (a.prob || 0));
     state.path = data;
     renderPath(data, opt);
+    updateStepper();
   } catch (err) {
     hide(els.stepPath);
     if (/登录|注册/.test(err.message)) openAuth('login');
     showError(err.message);
   } finally {
     state.pathing = false;
-    renderHumanPick();
+    updatePickUI();
   }
 }
 
@@ -1497,8 +1575,13 @@ els.btnReset.addEventListener('click', () => {
   hide(els.stepOptions);
   hide(els.stepResult);
   hide(els.stepStress);
+  hide(els.stepPath);
   state.result = null;
   state.supplements = [];
+  state.humanChoice = null;
+  state.path = null;
+  updateStepper();
+  updateRightEmpty();
   if (state.user) {
     els.scenario.value = '';
     els.scenario.focus();
@@ -1547,6 +1630,8 @@ els.btnHistoryClear.addEventListener('click', clearHistoryAll);
 els.btnHistoryMore.addEventListener('click', () => loadHistory(true));
 
 init();
+updateStepper();
+updateRightEmpty();
 
 /* 自动演示模式：?demo=1 走全流程；&capsule=1 自动打开命运胶囊；&round=1 自动补一轮信息 */
 const qs = new URLSearchParams(location.search);
