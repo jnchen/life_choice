@@ -92,6 +92,7 @@ const state = {
   options: [], // [{id,title,description,risk}]
   result: null, // 最近一次裁定结果
   humanChoice: null, // 人亲自选定的选项 id
+  path: null,        // 「我的路」结果 {path, futures, demo}
   user: null,
   authMode: 'login',
   demoScenarios: [],
@@ -322,6 +323,7 @@ async function generateOptions() {
   state.scenario = scenario;
   state.supplements = []; // 新场景/换一批选项 → 轮次清零
   state.humanChoice = null;
+  state.path = null;
   hide(els.errorLine);
   hide(els.stepResult);
   hide(els.stepStress);
@@ -379,6 +381,7 @@ async function decide() {
   state.deciding = true;
   hide(els.errorLine);
   hide(els.stepPath); // 新一轮概率评估，旧的未来推演作废
+  state.path = null;
   setLoading(els.btnDecide, true, '🔮 Jev 评估中…');
 
   const cards = [...els.optionsGrid.children];
@@ -616,6 +619,7 @@ async function runPath(choiceId) {
   if (!state.result || state.pathing) return;
   state.pathing = true;
   state.humanChoice = choiceId;
+  state.path = null;
   renderHumanPick();
   hide(els.errorLine);
 
@@ -634,6 +638,9 @@ async function runPath(choiceId) {
       options: state.options,
       choice: choiceId,
     });
+    // 统一按概率降序（演示数据未排序）
+    data.futures = (data.futures || []).sort((a, b) => (b.prob || 0) - (a.prob || 0));
+    state.path = data;
     renderPath(data, opt);
   } catch (err) {
     hide(els.stepPath);
@@ -923,7 +930,8 @@ function drawCapsule() {
   const W = canvas.width;   // 1000
   const H = canvas.height;  // 1400
   const r = state.result;
-  const opt = state.options.find((o) => o.id === r.choice) || state.options[0];
+  const hasPath = Boolean(state.path && state.humanChoice);
+  const opt = state.options.find((o) => o.id === (hasPath ? state.humanChoice : r.choice)) || state.options[0];
 
   const INK = '#f5f3ff';
   const INK2 = '#c9c4e4';
@@ -986,98 +994,178 @@ function drawCapsule() {
   ctx.fillStyle = rule;
   ctx.fillRect(80, y, W - 160, 2);
 
-  // 裁定标签
-  y += 64;
-  ctx.textAlign = 'center';
-  ctx.fillStyle = MUTED;
-  ctx.font = `400 26px ${FONT}`;
-  ctx.fillText('—  J e v  的  裁  定  —', W / 2, y);
-
-  // 中签标题（金色大字）
-  y += 88;
-  ctx.fillStyle = GOLD;
-  ctx.font = `800 76px ${FONT}`;
-  ctx.shadowColor = 'rgba(245,198,107,0.35)';
-  ctx.shadowBlur = 30;
-  ctx.fillText(opt.title, W / 2, y);
-  ctx.shadowBlur = 0;
-
-  // 描述
-  y += 52;
-  ctx.fillStyle = INK2;
-  ctx.font = `400 27px ${FONT}`;
-  const descLines = wrapCanvasText(ctx, opt.description || '', W - 200).slice(0, 2);
-  descLines.forEach((line, i) => ctx.fillText(line, W / 2, y + i * 40));
-  y += descLines.length * 40;
-
-  // 徽章行
-  y += 30;
-  ctx.font = `600 23px ${FONT}`;
-  const badgeTexts = [];
-  if (r.confidence != null) badgeTexts.push(`置信度 ${Math.round(r.confidence * 100)}%`);
-  if (r.importance) badgeTexts.push(r.importance.label);
-  if (r.gutFeeling != null) badgeTexts.push(r.gutFeeling >= 0.6 ? '你心里早有答案' : r.gutFeeling <= 0.4 ? '你还没想清楚' : 'Jev 看不透你');
-  const badgeStr = badgeTexts.join('   ·   ');
-  ctx.fillStyle = '#c4b8ff';
-  ctx.fillText(badgeStr, W / 2, y);
-
-  // 概率条标题
-  y += 66;
-  ctx.textAlign = 'left';
-  ctx.fillStyle = INK;
-  ctx.font = `700 26px ${FONT}`;
-  ctx.fillText('各选项命运倾向度', 60, y);
-  ctx.textAlign = 'right';
-  ctx.fillStyle = MUTED;
-  ctx.font = `400 21px ${FONT}`;
-  ctx.fillText('Jev 给出的概率分布', W - 60, y);
-
-  // 概率条（按概率降序）
-  y += 30;
-  const sorted = [...state.options].sort((a, b) => (r.probabilities[b.id] || 0) - (r.probabilities[a.id] || 0));
+  // 通用概率条绘制：items = [{label, pct, top, sub}]
   const BAR_X = 60;
   const BAR_W = W - 120;
   const BAR_H = 20;
-  for (const o of sorted) {
-    const p = r.probabilities[o.id] || 0;
-    const isWinner = o.id === r.choice;
+  const drawBars = (items, startY, withSub) => {
+    let by = startY;
+    for (const it of items) {
+      ctx.textAlign = 'left';
+      ctx.font = `600 25px ${FONT}`;
+      ctx.fillStyle = it.top ? GOLD : INK;
+      ctx.fillText(it.label, BAR_X, by + 26);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = INK2;
+      ctx.font = `500 24px ${FONT}`;
+      ctx.fillText(fmtPct(it.pct), BAR_X + BAR_W, by + 26);
 
-    // 标签行
-    ctx.textAlign = 'left';
-    ctx.font = `600 25px ${FONT}`;
-    ctx.fillStyle = isWinner ? GOLD : INK;
-    ctx.fillText(`${o.id} ${o.title}${isWinner ? '  ✓' : ''}`, BAR_X, y + 26);
-    ctx.textAlign = 'right';
-    ctx.fillStyle = INK2;
-    ctx.font = `500 24px ${FONT}`;
-    ctx.fillText(fmtPct(p), BAR_X + BAR_W, y + 26);
-
-    // 轨道 + 填充
-    const ty = y + 42;
-    ctx.fillStyle = 'rgba(255,255,255,0.07)';
-    roundRect(ctx, BAR_X, ty, BAR_W, BAR_H, 10);
-    ctx.fill();
-    const fw = Math.max(BAR_H, BAR_W * Math.min(1, p));
-    const fg = ctx.createLinearGradient(BAR_X, 0, BAR_X + fw, 0);
-    fg.addColorStop(0, '#7a6ee0');
-    fg.addColorStop(1, SERIES);
-    ctx.fillStyle = fg;
-    roundRect(ctx, BAR_X, ty, fw, BAR_H, 10);
-    ctx.fill();
-    if (isWinner) {
-      ctx.strokeStyle = GOLD;
-      ctx.lineWidth = 3;
-      roundRect(ctx, BAR_X - 2, ty - 2, BAR_W + 4, BAR_H + 4, 12);
-      ctx.stroke();
+      const ty = by + 42;
+      ctx.fillStyle = 'rgba(255,255,255,0.07)';
+      roundRect(ctx, BAR_X, ty, BAR_W, BAR_H, 10);
+      ctx.fill();
+      const fw = Math.max(BAR_H, BAR_W * Math.min(1, it.pct));
+      const fg = ctx.createLinearGradient(BAR_X, 0, BAR_X + fw, 0);
+      fg.addColorStop(0, '#7a6ee0');
+      fg.addColorStop(1, SERIES);
+      ctx.fillStyle = fg;
+      roundRect(ctx, BAR_X, ty, fw, BAR_H, 10);
+      ctx.fill();
+      if (it.top) {
+        ctx.strokeStyle = GOLD;
+        ctx.lineWidth = 3;
+        roundRect(ctx, BAR_X - 2, ty - 2, BAR_W + 4, BAR_H + 4, 12);
+        ctx.stroke();
+      }
+      if (withSub && it.sub) {
+        ctx.textAlign = 'left';
+        ctx.fillStyle = MUTED;
+        ctx.font = `400 22px ${FONT}`;
+        const subLine = wrapCanvasText(ctx, it.sub, BAR_W)[0] || '';
+        ctx.fillText(subLine, BAR_X, by + 92);
+        by += 124;
+      } else {
+        by += 96;
+      }
     }
-    y += 96;
+    return by;
+  };
+
+  if (hasPath) {
+    /* ---- 人选完之后：主角是「我的选择」+ 未来走向 ---- */
+    y += 64;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = MUTED;
+    ctx.font = `400 26px ${FONT}`;
+    ctx.fillText('—  我  的  选  择  —', W / 2, y);
+
+    y += 88;
+    ctx.fillStyle = GOLD;
+    ctx.font = `800 72px ${FONT}`;
+    ctx.shadowColor = 'rgba(245,198,107,0.35)';
+    ctx.shadowBlur = 30;
+    ctx.fillText(opt.title, W / 2, y);
+    ctx.shadowBlur = 0;
+
+    y += 52;
+    ctx.fillStyle = INK2;
+    ctx.font = `400 27px ${FONT}`;
+    const descLines = wrapCanvasText(ctx, opt.description || '', W - 200).slice(0, 2);
+    descLines.forEach((line, i) => ctx.fillText(line, W / 2, y + i * 40));
+    y += descLines.length * 40;
+
+    // 第一步
+    const firstStep = state.path.path?.firstStep;
+    if (firstStep) {
+      y += 46;
+      ctx.fillStyle = GOLD;
+      ctx.font = `600 26px ${FONT}`;
+      const fsLines = wrapCanvasText(ctx, `🚀 第一步：${firstStep}`, W - 200).slice(0, 2);
+      fsLines.forEach((line, i) => ctx.fillText(line, W / 2, y + i * 38));
+      y += (fsLines.length - 1) * 38;
+    }
+
+    // 未来走向概率条
+    y += 66;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = INK;
+    ctx.font = `700 26px ${FONT}`;
+    ctx.fillText('一年后，可能的走向', 60, y);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = MUTED;
+    ctx.font = `400 21px ${FONT}`;
+    ctx.fillText('Jev 给出的概率 —— 往往就是真正的未来', W - 60, y);
+
+    y += 30;
+    const futures = (state.path.futures || []).map((f, i) => ({
+      label: `${f.title}${i === 0 ? '  ✓ 最可能的未来' : ''}`,
+      pct: f.prob || 0,
+      top: i === 0,
+      sub: f.description,
+    }));
+    y = drawBars(futures, y, true);
+
+    // 附注：Jev 当初对各选项的概率参考
+    y += 16;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = MUTED;
+    ctx.font = `400 22px ${FONT}`;
+    const ref = state.options
+      .map((o) => `${o.title} ${fmtPct(r.probabilities[o.id] || 0)}`)
+      .join(' / ');
+    ctx.fillText(`Jev 当初的选项概率参考：${ref}`, W / 2, y);
+  } else {
+    /* ---- 还没选：只是概率参考 ---- */
+    y += 64;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = MUTED;
+    ctx.font = `400 26px ${FONT}`;
+    ctx.fillText('—  J e v  的  概  率  参  考  —', W / 2, y);
+
+    y += 84;
+    ctx.fillStyle = GOLD;
+    ctx.font = `800 56px ${FONT}`;
+    ctx.shadowColor = 'rgba(245,198,107,0.35)';
+    ctx.shadowBlur = 30;
+    ctx.fillText(`Jev 最看好：${opt.title}`, W / 2, y);
+    ctx.shadowBlur = 0;
+
+    // 徽章行
+    y += 62;
+    ctx.font = `600 23px ${FONT}`;
+    const badgeTexts = [];
+    if (r.confidence != null) badgeTexts.push(`置信度 ${Math.round(r.confidence * 100)}%`);
+    if (r.importance) badgeTexts.push(r.importance.label);
+    if (r.gutFeeling != null) badgeTexts.push(r.gutFeeling >= 0.6 ? '你心里早有答案' : r.gutFeeling <= 0.4 ? '你还没想清楚' : 'Jev 看不透你');
+    ctx.fillStyle = '#c4b8ff';
+    ctx.fillText(badgeTexts.join('   ·   '), W / 2, y);
+
+    // 概率条标题
+    y += 66;
+    ctx.textAlign = 'left';
+    ctx.fillStyle = INK;
+    ctx.font = `700 26px ${FONT}`;
+    ctx.fillText('各选项命运倾向度', 60, y);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = MUTED;
+    ctx.font = `400 21px ${FONT}`;
+    ctx.fillText('Jev 给出的概率分布', W - 60, y);
+
+    y += 30;
+    const sorted = [...state.options].sort((a, b) => (r.probabilities[b.id] || 0) - (r.probabilities[a.id] || 0));
+    y = drawBars(
+      sorted.map((o) => ({
+        label: `${o.id} ${o.title}${o.id === r.choice ? '  · 概率最高' : ''}`,
+        pct: r.probabilities[o.id] || 0,
+        top: o.id === r.choice,
+      })),
+      y,
+      false
+    );
+
+    // 提示：还没选
+    y += 20;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = GOLD;
+    ctx.font = `500 24px ${FONT}`;
+    ctx.fillText('概率只是参考，选哪条路由你定 —— 选定后胶囊会生成你的未来推演', W / 2, y);
   }
 
   // 页脚
   ctx.textAlign = 'center';
   ctx.fillStyle = MUTED;
   ctx.font = `400 21px ${FONT}`;
-  ctx.fillText('LLM 出题 · Jev（TypeSafe AI System One）执签', W / 2, H - 76);
+  ctx.fillText('LLM 出题 · Jev（TypeSafe AI System One）给概率 · 选择在人', W / 2, H - 76);
   ctx.fillText('仅供参考，人生自负 😉', W / 2, H - 42);
 }
 
@@ -1094,17 +1182,34 @@ function downloadCapsule() {
 
 async function copyCapsuleText() {
   const r = state.result;
-  const opt = state.options.find((o) => o.id === r.choice) || state.options[0];
-  const lines = [
-    '🏺 我的命运胶囊',
-    `场景：${effectiveScenario()}`,
-    `Jev 的裁定：${opt.title} —— ${opt.description}`,
-    '概率分布：' + state.options
-      .map((o) => `${o.title} ${fmtPct(r.probabilities[o.id] || 0)}`)
-      .join(' / '),
-    r.confidence != null ? `置信度 ${Math.round(r.confidence * 100)}%` : '',
-    '—— 人生选择器（LLM 出题 · Jev 执签，仅供参考，人生自负）',
-  ].filter(Boolean).join('\n');
+  const hasPath = Boolean(state.path && state.humanChoice);
+  const opt = state.options.find((o) => o.id === (hasPath ? state.humanChoice : r.choice)) || state.options[0];
+  let lines;
+  if (hasPath) {
+    lines = [
+      '🏺 我的命运胶囊',
+      `场景：${effectiveScenario()}`,
+      `我的选择：${opt.title} —— ${opt.description}`,
+      state.path.path?.firstStep ? `🚀 第一步：${state.path.path.firstStep}` : '',
+      '一年后的走向：' + (state.path.futures || [])
+        .map((f, i) => `${f.title} ${fmtPct(f.prob || 0)}${i === 0 ? '（最可能的未来）' : ''}`)
+        .join(' / '),
+      `（Jev 当初的选项概率参考：${state.options.map((o) => `${o.title} ${fmtPct(r.probabilities[o.id] || 0)}`).join(' / ')}）`,
+      '—— 人生选择器（LLM 出题 · Jev 给概率 · 选择在人，仅供参考，人生自负）',
+    ].filter(Boolean).join('\n');
+  } else {
+    lines = [
+      '🏺 我的命运胶囊',
+      `场景：${effectiveScenario()}`,
+      `Jev 最看好：${opt.title} —— ${opt.description}`,
+      '概率分布：' + state.options
+        .map((o) => `${o.title} ${fmtPct(r.probabilities[o.id] || 0)}`)
+        .join(' / '),
+      r.confidence != null ? `置信度 ${Math.round(r.confidence * 100)}%` : '',
+      '（概率只是参考，我还没做出选择）',
+      '—— 人生选择器（LLM 出题 · Jev 给概率 · 选择在人，仅供参考，人生自负）',
+    ].filter(Boolean).join('\n');
+  }
   try {
     await navigator.clipboard.writeText(lines);
     els.btnCapsuleCopy.textContent = '✅ 已复制';
@@ -1304,7 +1409,8 @@ function toggleHistoryDetail(card, item, btn) {
     fLabel.className = 'hist-detail-label';
     fLabel.textContent = '一年后的走向（Jev 概率）';
     detail.append(fLabel);
-    r.futures.forEach((f, i) => detail.append(mkProbRow(f.title, f.prob || 0, i === 0)));
+    const futs = [...r.futures].sort((a, b) => (b.prob || 0) - (a.prob || 0));
+    futs.forEach((f, i) => detail.append(mkProbRow(f.title, f.prob || 0, i === 0)));
   } else {
     const probLabel = document.createElement('div');
     probLabel.className = 'hist-detail-label';
