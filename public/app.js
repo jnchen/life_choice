@@ -58,6 +58,16 @@ const els = {
   authError: $('#authError'),
   btnAuthSubmit: $('#btnAuthSubmit'),
   btnAuthClose: $('#btnAuthClose'),
+  // 修改密码
+  btnPassword: $('#btnPassword'),
+  pwModal: $('#pwModal'),
+  pwForm: $('#pwForm'),
+  pwOld: $('#pwOld'),
+  pwNew: $('#pwNew'),
+  pwNew2: $('#pwNew2'),
+  pwError: $('#pwError'),
+  btnPwSubmit: $('#btnPwSubmit'),
+  btnPwClose: $('#btnPwClose'),
   tabLogin: $('#tabLogin'),
   tabRegister: $('#tabRegister'),
   gateHint: $('#gateHint'),
@@ -131,11 +141,15 @@ async function api(path, body) {
   return data;
 }
 
-function showError(msg) {
-  els.errorLine.textContent = `⚠️ ${msg}`;
+function showNotice(msg) {
+  els.errorLine.textContent = msg;
   els.errorLine.classList.remove('hidden');
-  clearTimeout(showError._t);
-  showError._t = setTimeout(() => els.errorLine.classList.add('hidden'), 6000);
+  clearTimeout(showNotice._t);
+  showNotice._t = setTimeout(() => els.errorLine.classList.add('hidden'), 6000);
+}
+
+function showError(msg) {
+  showNotice(`⚠️ ${msg}`);
 }
 
 function setLoading(btn, loading, text) {
@@ -167,6 +181,7 @@ function setAuthUI() {
   const loggedIn = Boolean(state.user);
   els.userBadge.classList.toggle('hidden', !loggedIn);
   els.btnHistory.classList.toggle('hidden', !loggedIn);
+  els.btnPassword.classList.toggle('hidden', !loggedIn);
   els.btnLogout.classList.toggle('hidden', !loggedIn);
   els.btnAuth.classList.toggle('hidden', loggedIn);
   els.gateHint.classList.toggle('hidden', loggedIn);
@@ -237,7 +252,45 @@ async function logout() {
   try { await api('/api/auth/logout', {}); } catch { /* 忽略 */ }
   state.user = null;
   closeHistory();
+  closePassword();
   setAuthUI();
+}
+
+/* ---------------- 修改密码 ---------------- */
+
+function openPassword() {
+  els.pwForm.reset();
+  els.pwError.classList.add('hidden');
+  els.pwModal.classList.remove('hidden');
+  els.backdrop.classList.remove('hidden');
+  els.pwOld.focus();
+}
+
+function closePassword() {
+  els.pwModal.classList.add('hidden');
+  els.backdrop.classList.add('hidden');
+}
+
+async function submitPassword(e) {
+  e.preventDefault();
+  const oldPassword = els.pwOld.value;
+  const newPassword = els.pwNew.value;
+  if (newPassword !== els.pwNew2.value) {
+    els.pwError.textContent = '两次输入的新密码不一致';
+    els.pwError.classList.remove('hidden');
+    return;
+  }
+  setLoading(els.btnPwSubmit, true, '修改中…');
+  try {
+    await api('/api/auth/password', { oldPassword, newPassword });
+    closePassword();
+    showNotice('✅ 密码已修改，其他设备已被踢下线');
+  } catch (err) {
+    els.pwError.textContent = err.message;
+    els.pwError.classList.remove('hidden');
+  } finally {
+    setLoading(els.btnPwSubmit, false);
+  }
 }
 
 /* ---------------- 悬浮提示（概率条/卡片详情） ---------------- */
@@ -1371,10 +1424,15 @@ els.scenario.addEventListener('keydown', (e) => {
 els.btnAuth.addEventListener('click', () => openAuth('login'));
 els.btnLogout.addEventListener('click', logout);
 els.btnAuthClose.addEventListener('click', closeAuth);
-els.backdrop.addEventListener('click', () => { closeAuth(); closeHistory(); closeCapsule(); });
+els.backdrop.addEventListener('click', () => { closeAuth(); closeHistory(); closeCapsule(); closePassword(); });
 els.tabLogin.addEventListener('click', () => switchAuthTab('login'));
 els.tabRegister.addEventListener('click', () => switchAuthTab('register'));
 els.authForm.addEventListener('submit', submitAuth);
+
+/* 修改密码 */
+els.btnPassword.addEventListener('click', openPassword);
+els.btnPwClose.addEventListener('click', closePassword);
+els.pwForm.addEventListener('submit', submitPassword);
 
 /* 历史 */
 els.btnHistory.addEventListener('click', openHistory);

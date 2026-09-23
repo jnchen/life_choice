@@ -14,6 +14,7 @@
     <div class="topbar">
       <span class="topbar-user hidden" id="userBadge"></span>
       <button class="btn btn-ghost btn-sm hidden" id="btnHistory" type="button">🕘 历史记录</button>
+      <button class="btn btn-ghost btn-sm hidden" id="btnPassword" type="button">🔑 改密码</button>
       <button class="btn btn-sm hidden" id="btnAuth" type="button">登录 / 注册</button>
       <button class="btn btn-ghost btn-sm hidden" id="btnLogout" type="button">退出</button>
     </div>
@@ -163,6 +164,33 @@
         <button class="btn btn-primary btn-lg" id="btnAuthSubmit" type="submit">登录</button>
       </form>
       <p class="auth-note">登录后可输入自己的场景调用真实模型，并保存历史记录。</p>
+    </div>
+  </div>
+
+  <!-- 修改密码弹窗 -->
+  <div id="pwModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pwTitle">
+    <div class="modal-card">
+      <div class="modal-head">
+        <div class="modal-title" id="pwTitle">🔑 修改密码</div>
+        <button class="modal-x" id="btnPwClose" type="button" aria-label="关闭">✕</button>
+      </div>
+      <form id="pwForm" class="auth-form" novalidate>
+        <label class="auth-field">
+          <span>原密码</span>
+          <input id="pwOld" type="password" autocomplete="current-password" required>
+        </label>
+        <label class="auth-field">
+          <span>新密码</span>
+          <input id="pwNew" type="password" autocomplete="new-password" placeholder="至少 6 位" required>
+        </label>
+        <label class="auth-field">
+          <span>确认新密码</span>
+          <input id="pwNew2" type="password" autocomplete="new-password" placeholder="再输入一遍" required>
+        </label>
+        <p class="auth-error hidden" id="pwError" role="alert"></p>
+        <button class="btn btn-primary btn-lg" id="btnPwSubmit" type="submit">确认修改</button>
+      </form>
+      <p class="auth-note">修改成功后，其他设备上的登录会被踢下线，本设备保持登录。</p>
     </div>
   </div>
 

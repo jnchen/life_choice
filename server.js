@@ -630,6 +630,20 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie('', 0) });
     }
 
+    /* POST /api/auth/password {oldPassword, newPassword} —— 需登录；
+       改成功后踢掉其他设备上的会话，当前会话保留 */
+    if (req.method === 'POST' && url.pathname === '/api/auth/password') {
+      if (!user) return sendJSON(res, 401, { error: '请先登录' });
+      const body = JSON.parse((await readBody(req)) || '{}');
+      try {
+        db.changePassword(user.id, body.oldPassword, body.newPassword);
+      } catch (err) {
+        return sendJSON(res, 400, { error: err.message });
+      }
+      db.deleteOtherSessions(user.id, parseCookies(req).lc_session);
+      return sendJSON(res, 200, { ok: true });
+    }
+
     /* GET /api/me */
     if (req.method === 'GET' && url.pathname === '/api/me') {
       return sendJSON(res, 200, { user });

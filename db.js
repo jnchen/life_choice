@@ -80,6 +80,17 @@ function verifyUser(email, password) {
   return { id: row.id, email: row.email, username: row.username };
 }
 
+/** 修改密码：先验原密码，通过后换新盐重哈希 */
+function changePassword(userId, oldPassword, newPassword) {
+  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  if (!row) throw new Error('用户不存在');
+  if (!verifyPassword(String(oldPassword), row.salt, row.password_hash)) throw new Error('原密码不正确');
+  if (String(newPassword).length < 6) throw new Error('新密码至少 6 位');
+  if (String(newPassword) === String(oldPassword)) throw new Error('新密码不能和原密码一样');
+  const { salt, hash } = hashPassword(newPassword);
+  db.prepare('UPDATE users SET password_hash = ?, salt = ? WHERE id = ?').run(hash, salt, userId);
+}
+
 /* ---------------- 会话 ---------------- */
 
 const SESSION_TTL = 1000 * 60 * 60 * 24 * 14; // 14 天
@@ -109,6 +120,11 @@ function getUserByToken(token) {
 
 function deleteSession(token) {
   if (token) db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+}
+
+/** 改密码后调用：踢掉该用户在其他设备上的所有会话，仅保留当前 */
+function deleteOtherSessions(userId, keepToken) {
+  db.prepare('DELETE FROM sessions WHERE user_id = ? AND token != ?').run(userId, keepToken || '');
 }
 
 function cleanExpiredSessions() {
@@ -159,7 +175,7 @@ function safeParse(s, fallback) {
 }
 
 module.exports = {
-  createUser, verifyUser,
-  createSession, getUserByToken, deleteSession, cleanExpiredSessions,
+  createUser, verifyUser, changePassword,
+  createSession, getUserByToken, deleteSession, deleteOtherSessions, cleanExpiredSessions,
   addHistory, listHistory, getHistory, deleteHistory, clearHistory,
 };

@@ -146,6 +146,7 @@ life_choice/
 | POST | `/api/auth/register` | 注册并登录 | 否 |
 | POST | `/api/auth/login` | 登录 | 否 |
 | POST | `/api/auth/logout` | 登出 | 是 |
+| POST | `/api/auth/password` | 修改密码（验原密码，踢掉其他设备会话） | 是 |
 | GET | `/api/me` | 当前登录用户 | 否 |
 | GET | `/api/status` | 服务状态 + 内置 demo 场景 | 否 |
 | POST | `/api/options` | 生成选项（游客限 demo 场景） | 部分 |
