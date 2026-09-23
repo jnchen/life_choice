@@ -24,6 +24,13 @@ const els = {
   stepOptions: $('#stepOptions'),
   stepResult: $('#stepResult'),
   stepStress: $('#stepStress'),
+  stepPath: $('#stepPath'),
+  pathIntro: $('#pathIntro'),
+  pathBrainstorm: $('#pathBrainstorm'),
+  futureList: $('#futureList'),
+  pathDemo: $('#pathDemo'),
+  humanPick: $('#humanPick'),
+  humanPickBtns: $('#humanPickBtns'),
   stressIntro: $('#stressIntro'),
   stressList: $('#stressList'),
   stressVerdict: $('#stressVerdict'),
@@ -74,6 +81,7 @@ const state = {
   supplements: [],    // 多轮补充的信息 [{text, pick, pickTitle}]
   options: [], // [{id,title,description,risk}]
   result: null, // 最近一次裁定结果
+  humanChoice: null, // 人亲自选定的选项 id
   user: null,
   authMode: 'login',
   demoScenarios: [],
@@ -260,9 +268,11 @@ async function generateOptions() {
   }
   state.scenario = scenario;
   state.supplements = []; // 新场景/换一批选项 → 轮次清零
+  state.humanChoice = null;
   hide(els.errorLine);
   hide(els.stepResult);
   hide(els.stepStress);
+  hide(els.stepPath);
 
   setLoading(els.btnGenerate, true, '✨ AI 正在出题…');
   try {
@@ -315,7 +325,8 @@ async function decide() {
   if (state.options.length < 2 || state.deciding) return;
   state.deciding = true;
   hide(els.errorLine);
-  setLoading(els.btnDecide, true, '🔮 Jev 正在执签…');
+  hide(els.stepPath); // 新一轮概率评估，旧的未来推演作废
+  setLoading(els.btnDecide, true, '🔮 Jev 评估中…');
 
   const cards = [...els.optionsGrid.children];
   cards.forEach((c) => c.classList.remove('winner', 'hot'));
@@ -398,7 +409,7 @@ function renderResult(data) {
     lastRound.pickTitle = opt.title;
   }
 
-  els.verdictTitle.textContent = opt.title;
+  els.verdictTitle.textContent = `Jev 最看好：${opt.title}`;
   els.verdictDesc.textContent = opt.risk
     ? `${opt.description}（代价：${opt.risk}）`
     : opt.description;
@@ -417,7 +428,7 @@ function renderResult(data) {
 
   // Jev 觉得信息不足时给出提示（阈值 0.5）
   if (r.infoSufficient != null && r.infoSufficient < 0.5) {
-    els.infoHint.textContent = `🤔 Jev 觉得信息不太够（充足度 ${Math.round(r.infoSufficient * 100)}%）—— 补充点细节再裁一次，答案可能更靠谱`;
+    els.infoHint.textContent = `🤔 Jev 觉得信息不太够（充足度 ${Math.round(r.infoSufficient * 100)}%）—— 补充点细节再评估一次，概率可能更靠谱`;
     els.infoHint.classList.remove('hidden');
   } else {
     els.infoHint.classList.add('hidden');
@@ -439,7 +450,7 @@ function renderResult(data) {
       const pick = document.createElement('span');
       const prevTitle = i > 0 ? state.supplements[i - 1].pickTitle : null;
       pick.className = `round-pick${prevTitle && prevTitle !== s.pickTitle ? ' changed' : ''}`;
-      pick.textContent = `→ 裁为 ${s.pickTitle}`;
+      pick.textContent = `→ Jev 看好 ${s.pickTitle}`;
       item.append(pick);
     }
     els.roundsTimeline.append(item);
@@ -534,6 +545,141 @@ function renderResult(data) {
     parts.push(`输入 ${r.usage.input_tokens} tok / 输出 ${r.usage.output_tokens ?? 0} tok`);
   }
   els.meta.textContent = parts.join(' · ');
+
+  // 人来选：每个选项一个按钮，点了就顺着推演未来
+  renderHumanPick();
+}
+
+/* ---------------- 我的路：人选完 → 头脑风暴 + 未来推演 ---------------- */
+
+function renderHumanPick() {
+  els.humanPickBtns.textContent = '';
+  for (const o of state.options) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `btn pick-btn${state.humanChoice === o.id ? ' chosen' : ''}`;
+    btn.textContent = `${o.id} ${o.title}`;
+    btn.disabled = state.pathing;
+    btn.addEventListener('click', () => runPath(o.id));
+    els.humanPickBtns.append(btn);
+  }
+}
+
+async function runPath(choiceId) {
+  if (!state.result || state.pathing) return;
+  state.pathing = true;
+  state.humanChoice = choiceId;
+  renderHumanPick();
+  hide(els.errorLine);
+
+  const opt = state.options.find((o) => o.id === choiceId) || {};
+  els.pathIntro.textContent = `你选了「${opt.title}」—— LLM 正在顺着这个选择头脑风暴，并推演一年后的走向，Jev 会为每种走向给出概率……`;
+  els.pathBrainstorm.textContent = '';
+  els.pathBrainstorm.classList.add('hidden');
+  els.futureList.textContent = '';
+  els.pathDemo.classList.add('hidden');
+  show(els.stepPath);
+  scrollToEl(els.stepPath);
+
+  try {
+    const data = await api('/api/path', {
+      scenario: effectiveScenario(),
+      options: state.options,
+      choice: choiceId,
+    });
+    renderPath(data, opt);
+  } catch (err) {
+    hide(els.stepPath);
+    if (/登录|注册/.test(err.message)) openAuth('login');
+    showError(err.message);
+  } finally {
+    state.pathing = false;
+    renderHumanPick();
+  }
+}
+
+function renderPath(data, opt) {
+  els.pathIntro.textContent = `你选了「${opt.title}」。顺着这条路，先做头脑风暴，再看一年后的可能走向：`;
+  els.pathDemo.classList.toggle('hidden', !data.demo);
+
+  // 头脑风暴：第一步 + 行动建议 + 风险预案
+  const p = data.path || {};
+  const bs = els.pathBrainstorm;
+  bs.textContent = '';
+  if (p.firstStep) {
+    const first = document.createElement('div');
+    first.className = 'path-first';
+    const fl = document.createElement('span');
+    fl.className = 'path-first-label';
+    fl.textContent = '🚀 第一步';
+    const ft = document.createElement('span');
+    ft.textContent = p.firstStep;
+    first.append(fl, ft);
+    bs.append(first);
+  }
+  const mkList = (label, icon, items, cls) => {
+    if (!items || !items.length) return;
+    const block = document.createElement('div');
+    block.className = `path-block ${cls}`;
+    const lb = document.createElement('div');
+    lb.className = 'path-block-label';
+    lb.textContent = `${icon} ${label}`;
+    block.append(lb);
+    for (const it of items) {
+      const row = document.createElement('div');
+      row.className = 'path-item';
+      row.textContent = it;
+      block.append(row);
+    }
+    bs.append(block);
+  };
+  mkList('行动建议', '🗺', p.actions, 'actions');
+  mkList('风险预案', '🛡', p.watchouts, 'watchouts');
+  bs.classList.remove('hidden');
+
+  // 未来走向概率条（后端已按概率降序）
+  els.futureList.textContent = '';
+  (data.futures || []).forEach((f, i) => {
+    const top = i === 0;
+    const row = document.createElement('div');
+    row.className = `prob-row future-row${top ? ' winner' : ''}`;
+
+    const label = document.createElement('div');
+    label.className = 'prob-label';
+    const name = document.createElement('span');
+    name.className = 'prob-name';
+    const ptitle = document.createElement('span');
+    ptitle.className = 'ptitle';
+    ptitle.textContent = f.title;
+    name.append(ptitle);
+    if (top) {
+      const badge = document.createElement('span');
+      badge.className = 'pick-badge';
+      badge.textContent = '✓ 最可能的未来';
+      name.append(badge);
+    }
+    const val = document.createElement('span');
+    val.className = 'prob-val';
+    val.textContent = fmtPct(f.prob || 0);
+    label.append(name, val);
+
+    const track = document.createElement('div');
+    track.className = 'prob-track';
+    const fill = document.createElement('div');
+    fill.className = 'prob-fill';
+    track.append(fill);
+
+    const desc = document.createElement('div');
+    desc.className = 'future-desc';
+    desc.textContent = f.description;
+
+    row.append(label, track, desc);
+    row.setAttribute('aria-label', `走向 ${f.title}：概率 ${fmtPct(f.prob || 0)}${top ? '，最可能的未来' : ''}。${f.description}`);
+    els.futureList.append(row);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      fill.style.width = `${Math.min(100, (f.prob || 0) * 100)}%`;
+    }));
+  });
 }
 
 /* ---------------- 多轮补充 ---------------- */
@@ -985,7 +1131,7 @@ function renderHistoryItem(item) {
   time.textContent = fmtTime(item.createdAt);
   const choice = document.createElement('span');
   choice.className = 'hist-choice';
-  choice.textContent = `→ ${opt.title || '—'}`;
+  choice.textContent = r.human ? `→ 你选了 ${opt.title || '—'}` : `→ ${opt.title || '—'}`;
   meta.append(time, choice);
   if (supplements.length) {
     const supp = document.createElement('span');
@@ -1059,34 +1205,68 @@ function toggleHistoryDetail(card, item, btn) {
     detail.append(suppBlock);
   }
 
-  // 概率分布
-  const probLabel = document.createElement('div');
-  probLabel.className = 'hist-detail-label';
-  probLabel.textContent = '本轮裁定';
-  detail.append(probLabel);
-  const sorted = [...(item.options || [])].sort((a, b) => (r.probabilities?.[b.id] || 0) - (r.probabilities?.[a.id] || 0));
-  for (const o of sorted) {
-    const p = r.probabilities?.[o.id] || 0;
-    const isWinner = o.id === r.choice;
+  // 概率分布（普通裁定）或 未来走向 + 头脑风暴（人选完后的「我的路」）
+  const mkProbRow = (name, pct, isWinner) => {
     const row = document.createElement('div');
     row.className = `prob-row${isWinner ? ' winner' : ''}`;
     const label = document.createElement('div');
     label.className = 'prob-label';
-    const name = document.createElement('span');
-    name.className = 'prob-name';
-    name.textContent = `${o.id} ${o.title}${isWinner ? ' ✓' : ''}`;
+    const nm = document.createElement('span');
+    nm.className = 'prob-name';
+    nm.textContent = `${name}${isWinner ? ' ✓' : ''}`;
     const val = document.createElement('span');
     val.className = 'prob-val';
-    val.textContent = fmtPct(p);
-    label.append(name, val);
+    val.textContent = fmtPct(pct);
+    label.append(nm, val);
     const track = document.createElement('div');
     track.className = 'prob-track';
     const fill = document.createElement('div');
     fill.className = 'prob-fill';
-    fill.style.width = `${Math.min(100, p * 100)}%`;
+    fill.style.width = `${Math.min(100, pct * 100)}%`;
     track.append(fill);
     row.append(label, track);
-    detail.append(row);
+    return row;
+  };
+
+  if (Array.isArray(r.futures) && r.futures.length) {
+    if (r.path && (r.path.firstStep || (r.path.actions || []).length)) {
+      const pLabel = document.createElement('div');
+      pLabel.className = 'hist-detail-label';
+      pLabel.textContent = '头脑风暴';
+      detail.append(pLabel);
+      if (r.path.firstStep) {
+        const first = document.createElement('div');
+        first.className = 'hist-supp-item';
+        first.textContent = `🚀 第一步：${r.path.firstStep}`;
+        detail.append(first);
+      }
+      for (const a of (r.path.actions || []).slice(0, 4)) {
+        const row = document.createElement('div');
+        row.className = 'hist-supp-item';
+        row.textContent = `🗺 ${a}`;
+        detail.append(row);
+      }
+      for (const w of (r.path.watchouts || []).slice(0, 3)) {
+        const row = document.createElement('div');
+        row.className = 'hist-supp-item';
+        row.textContent = `🛡 ${w}`;
+        detail.append(row);
+      }
+    }
+    const fLabel = document.createElement('div');
+    fLabel.className = 'hist-detail-label';
+    fLabel.textContent = '一年后的走向（Jev 概率）';
+    detail.append(fLabel);
+    r.futures.forEach((f, i) => detail.append(mkProbRow(f.title, f.prob || 0, i === 0)));
+  } else {
+    const probLabel = document.createElement('div');
+    probLabel.className = 'hist-detail-label';
+    probLabel.textContent = '本轮裁定';
+    detail.append(probLabel);
+    const sorted = [...(item.options || [])].sort((a, b) => (r.probabilities?.[b.id] || 0) - (r.probabilities?.[a.id] || 0));
+    for (const o of sorted) {
+      detail.append(mkProbRow(`${o.id} ${o.title}`, r.probabilities?.[o.id] || 0, o.id === r.choice));
+    }
   }
   card.append(detail);
 }

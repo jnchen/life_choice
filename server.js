@@ -388,6 +388,87 @@ async function jevChoose(scenario, options) {
   return normalizePick(resp.answers?.pick, options);
 }
 
+/* ---------------- ④ 我的路：人选完之后，头脑风暴 + 未来推演 ---------------- */
+
+const PATH_SYSTEM_PROMPT = [
+  '你是「人生路径规划师」。给定一个人生抉择场景，以及当事人最终亲自选定的选项，做两件事：',
+  '1. 头脑风暴：顺着这个选择，给出务实的第一步、行动建议和风险预案。',
+  '2. 未来推演：顺势推演这个选择一年后的 3 种可能走向——一个偏顺利、一个有波折、一个意外转向。要具体、有画面感，像真实会发生的故事。',
+  '只输出 JSON，不要任何多余文字，格式：',
+  '{"first_step":"第一步行动，一句话，不超过40字",',
+  ' "actions":["行动建议，每条不超过30字","...","..."],',
+  ' "watchouts":["风险与对应预案，每条不超过30字","..."],',
+  ' "futures":[{"title":"走向名，不超过10个字","description":"一年后的具体情景，不超过80字"}]}',
+].join('\n');
+
+async function llmGeneratePath(scenario, option) {
+  const { LLM_BASE, LLM_KEY, LLM_MODEL } = getConfig();
+  const data = await postJSON(`${LLM_BASE}/chat/completions`, {
+    model: LLM_MODEL,
+    messages: [
+      { role: 'system', content: PATH_SYSTEM_PROMPT },
+      { role: 'user', content: `人生场景：${scenario}\n\n当事人最终选定：${option.id}. ${option.title} —— ${option.description}` },
+    ],
+    temperature: 0.85,
+  }, { timeoutMs: 60000, headers: { Authorization: `Bearer ${LLM_KEY}` } });
+
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error('LLM 没有返回内容');
+  const parsed = extractJSON(content);
+  const futuresRaw = Array.isArray(parsed.futures) ? parsed.futures : [];
+  if (futuresRaw.length < 2) throw new Error('LLM 没有返回未来走向');
+  return {
+    firstStep: String(parsed.first_step || '').trim().slice(0, 60),
+    actions: (Array.isArray(parsed.actions) ? parsed.actions : [])
+      .map((a) => String(a).trim().slice(0, 60)).filter(Boolean).slice(0, 4),
+    watchouts: (Array.isArray(parsed.watchouts) ? parsed.watchouts : [])
+      .map((w) => String(w).trim().slice(0, 60)).filter(Boolean).slice(0, 3),
+    futures: futuresRaw.slice(0, 4).map((f, i) => ({
+      id: 'ABCD'[i] || String(i + 1),
+      title: String(f.title || `走向${i + 1}`).trim().slice(0, 12),
+      description: String(f.description || '').trim().slice(0, 120),
+    })),
+  };
+}
+
+/** 未来走向：问 Jev「哪种走向最可能成为现实」 */
+async function jevFutures(scenario, option, futures) {
+  const state = [
+    '一个真实的人生抉择场景，当事人已经做出选择，请推演后续发展：',
+    `场景：${scenario}`,
+    `当事人选定的路：${option.title} —— ${option.description}`,
+    '',
+    '一年后可能的走向：',
+    ...futures.map((f) => `${f.id}. ${f.title} —— ${f.description}`),
+  ].join('\n');
+  const resp = await jevQuery(state, {
+    future: {
+      type: 'choice',
+      instructions: '综合考虑当事人的处境、这个选择的典型发展轨迹与现实阻力，一年后哪种走向最可能成为现实？',
+      criteria: Object.fromEntries(futures.map((f) => [f.id, `${f.title}：${f.description}`])),
+    },
+  });
+  return normalizePick(resp.answers?.future, futures);
+}
+
+/** 演示模式的「我的路」 */
+function mockPath(scenario, options, choiceId) {
+  const futures = [
+    { id: 'A', title: '渐入佳境', description: '开头有点难，但三个月后找到节奏，一年后已经站稳，回头看觉得选对了' },
+    { id: 'B', title: '波折调整', description: '中途遇到一次像样的挫折，被迫调整打法，最后以打折的方式部分兑现' },
+    { id: 'C', title: '意外转向', description: '做着做着发现了旁边的一条岔路，顺势拐过去，结果和最初的设想完全不同' },
+  ];
+  const pick = mockDecide(futures.map((f) => ({ ...f, risk: '' })));
+  return {
+    path: {
+      firstStep: '先把接下来两周能做的最小行动列出来，今天就开始第一件',
+      actions: ['设一个三个月的检查点，到期认真复盘一次', '找一个走过这条路的人聊聊细节', '给最坏情况准备一条退路'],
+      watchouts: ['前三个月最容易放弃：提前约好同行者互相盯着', '沉没成本陷阱：设定止损线，到了就认'],
+    },
+    futures: futures.map((f) => ({ ...f, prob: pick.probabilities[f.id] || 0 })),
+  };
+}
+
 /* ---------------- 演示模式（未配置 key） ---------------- */
 
 const MOCK_OPTION_SETS = [
@@ -687,6 +768,66 @@ const server = http.createServer(async (req, res) => {
         })
       );
       return sendJSON(res, 200, { demo: false, variants: results });
+    }
+
+    /* POST /api/path {scenario, options[], choice} → {demo, path, futures[]}
+       人亲自选定选项后：LLM 头脑风暴（第一步/行动/预案）+ 生成未来走向分支，Jev 给每个走向一个概率 */
+    if (req.method === 'POST' && url.pathname === '/api/path') {
+      const cfg = getConfig();
+      const body = JSON.parse((await readBody(req)) || '{}');
+      let scenario = String(body.scenario || '').trim();
+      const humanChoice = String(body.choice || '').trim();
+      const raw = Array.isArray(body.options) ? body.options : [];
+      const options = raw
+        .filter((o) => o && typeof o.title === 'string' && o.title.trim())
+        .slice(0, 6)
+        .map((o, i) => ({
+          id: /^[A-F]$/.test(String(o.id)) ? String(o.id) : 'ABCDE'[i] || String(i + 1),
+          title: String(o.title).trim().slice(0, 24),
+          description: String(o.description || '').trim().slice(0, 120),
+          risk: String(o.risk || '').trim().slice(0, 80),
+        }));
+      if (!scenario) return sendJSON(res, 400, { error: '缺少场景描述' });
+      if (scenario.length > 3000) return sendJSON(res, 400, { error: '场景描述太长了（含补充信息上限 3000 字）' });
+      if (options.length < 2) return sendJSON(res, 400, { error: '至少需要两个选项' });
+      const chosen = options.find((o) => o.id === humanChoice);
+      if (!chosen) return sendJSON(res, 400, { error: '缺少你的选择' });
+
+      const guestDemoFull = !user ? matchDemoScenario(baseScenario(scenario)) : null;
+      if (!user && !guestDemoFull) {
+        return sendJSON(res, 401, { error: '注册登录后，才能输入自己的场景调用真实模型' });
+      }
+      if (guestDemoFull) scenario = guestDemoFull;
+
+      // 需要同时有 LLM（头脑风暴+走向）和 Jev（走向概率），缺一就走演示
+      if (!cfg.LLM_KEY || !cfg.JEV_KEY || guestDemoFull) {
+        return sendJSON(res, 200, { demo: true, ...mockPath(scenario, options, humanChoice) });
+      }
+
+      const { firstStep, actions, watchouts, futures } = await llmGeneratePath(scenario, chosen);
+      const pick = await jevFutures(scenario, chosen, futures);
+      const futuresWithProb = futures
+        .map((f) => ({ ...f, prob: pick.probabilities[f.id] || 0 }))
+        .sort((a, b) => b.prob - a.prob);
+
+      if (user) {
+        db.addHistory(user.id, {
+          scenario,
+          options,
+          result: {
+            choice: humanChoice,
+            human: true,
+            path: { firstStep, actions, watchouts },
+            futures: futuresWithProb,
+            demo: false,
+          },
+        });
+      }
+      return sendJSON(res, 200, {
+        demo: false,
+        path: { firstStep, actions, watchouts },
+        futures: futuresWithProb,
+      });
     }
 
     /* ================= 历史记录（需登录） ================= */

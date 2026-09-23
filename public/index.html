@@ -47,13 +47,13 @@
         <button id="btnRegen" class="btn btn-ghost btn-sm" type="button">换一批</button>
       </div>
       <div id="optionsGrid" class="options-grid" aria-live="polite"></div>
-      <button id="btnDecide" class="btn btn-fate btn-lg">🎲 让 Jev 替我决定</button>
+      <button id="btnDecide" class="btn btn-fate btn-lg">🎲 让 Jev 给出概率</button>
     </section>
 
     <!-- 第三步：裁定结果 -->
     <section id="stepResult" class="card hidden" aria-live="assertive">
       <div class="verdict-rule" aria-hidden="true"></div>
-      <div class="verdict-label">— Jev 的裁定 —</div>
+      <div class="verdict-label">— Jev 的概率参考 —</div>
       <div id="verdictTitle" class="verdict-title"></div>
       <div id="verdictDesc" class="verdict-desc"></div>
       <div id="badges" class="badges"></div>
@@ -67,6 +67,12 @@
 
       <div id="meta" class="meta"></div>
 
+      <!-- 人来选：Jev 只给概率，选择权在你 -->
+      <div class="human-pick" id="humanPick">
+        <div class="human-pick-label">☝️ 概率只是参考，选哪条路由你定：</div>
+        <div class="human-pick-btns" id="humanPickBtns"></div>
+      </div>
+
       <!-- 多轮补充：Jev 觉得信息不足时，用户可以补充细节再裁 -->
       <div id="roundsTimeline" class="rounds-timeline hidden"></div>
       <div id="infoHint" class="info-hint hidden" role="note"></div>
@@ -78,7 +84,7 @@
           placeholder="💬 补充点细节（比如预算、家庭情况、内心倾向…），让 Jev 带着新信息再裁一次"
         ></textarea>
         <div class="supplement-side">
-          <button id="btnSupplement" class="btn btn-primary" type="button">🔮 补充后再裁一次</button>
+          <button id="btnSupplement" class="btn btn-primary" type="button">🔮 补充后重新评估</button>
           <label class="supp-regen" title="勾选后：补充信息会一并交给 LLM 重新出题，再由 Jev 执签">
             <input type="checkbox" id="suppRegen">
             同时重新生成选项
@@ -94,7 +100,22 @@
       </div>
     </section>
 
-    <!-- 第四步：决策压力测试 -->
+    <!-- 第四步：我的路（人选完之后：头脑风暴 + 未来推演） -->
+    <section id="stepPath" class="card hidden">
+      <div class="step-head">
+        <div class="step-title">🧭 我的路</div>
+        <span id="pathDemo" class="demo-flag hidden">演示数据</span>
+      </div>
+      <p class="path-intro" id="pathIntro"></p>
+      <div id="pathBrainstorm" class="path-brainstorm hidden"></div>
+      <div class="prob-head" id="futureHead">
+        <div class="prob-title">一年后，可能的走向</div>
+        <div class="prob-hint">Jev 给出的概率 —— 往往就是真正的未来</div>
+      </div>
+      <div id="futureList" class="future-list"></div>
+    </section>
+
+    <!-- 第五步：决策压力测试 -->
     <section id="stepStress" class="card hidden">
       <div class="step-head">
         <div class="step-title">🔬 决策压力测试</div>

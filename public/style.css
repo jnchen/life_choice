@@ -838,6 +838,83 @@ textarea:disabled { opacity: 0.6; cursor: not-allowed; }
   padding: 1px 8px;
 }
 
+/* 人来选 */
+.human-pick {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px dashed rgba(245, 198, 107, 0.45);
+  border-radius: 12px;
+  background: rgba(245, 198, 107, 0.05);
+}
+.human-pick-label {
+  font-size: 13px;
+  color: var(--gold);
+  margin-bottom: 10px;
+}
+.human-pick-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pick-btn {
+  font-size: 13px;
+  padding: 8px 14px;
+}
+.pick-btn.chosen {
+  border-color: var(--gold);
+  color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold), 0 4px 18px rgba(245, 198, 107, 0.18);
+}
+
+/* 我的路 */
+.path-intro {
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin: 4px 0 12px;
+}
+.path-brainstorm { margin-bottom: 16px; }
+.path-first {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 14px;
+  line-height: 1.7;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(245, 198, 107, 0.08);
+  border: 1px solid rgba(245, 198, 107, 0.3);
+  margin-bottom: 10px;
+}
+.path-first-label { flex: none; color: var(--gold); font-size: 12.5px; }
+.path-block { margin-bottom: 10px; }
+.path-block-label {
+  font-size: 11.5px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  margin-bottom: 5px;
+}
+.path-item {
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 6px 12px;
+  margin-bottom: 4px;
+  border-left: 2px solid var(--series);
+  background: rgba(144, 133, 233, 0.05);
+  border-radius: 0 6px 6px 0;
+}
+.path-block.watchouts .path-item {
+  border-left-color: var(--gold);
+  background: rgba(245, 198, 107, 0.05);
+}
+.future-row { margin-bottom: 12px; }
+.future-desc {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin-top: 5px;
+}
+
 .demo-flag {
   font-size: 11px;
   color: var(--muted);
