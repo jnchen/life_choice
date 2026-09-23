@@ -67,6 +67,19 @@
 
       <div id="meta" class="meta"></div>
 
+      <!-- 多轮补充：Jev 觉得信息不足时，用户可以补充细节再裁 -->
+      <div id="roundsTimeline" class="rounds-timeline hidden"></div>
+      <div id="infoHint" class="info-hint hidden" role="note"></div>
+      <div class="supplement-box">
+        <textarea
+          id="supplementInput"
+          rows="2"
+          maxlength="500"
+          placeholder="💬 补充点细节（比如预算、家庭情况、内心倾向…），让 Jev 带着新信息再裁一次"
+        ></textarea>
+        <button id="btnSupplement" class="btn btn-primary" type="button">🔮 补充后再裁一次</button>
+      </div>
+
       <div class="result-actions">
         <button id="btnRedecide" class="btn" type="button">🎴 再掷一次</button>
         <button id="btnStress" class="btn" type="button">🔬 压力测试</button>

@@ -16,6 +16,10 @@ const els = {
   btnReset: $('#btnReset'),
   btnStress: $('#btnStress'),
   btnCapsule: $('#btnCapsule'),
+  supplementInput: $('#supplementInput'),
+  btnSupplement: $('#btnSupplement'),
+  roundsTimeline: $('#roundsTimeline'),
+  infoHint: $('#infoHint'),
   stepOptions: $('#stepOptions'),
   stepResult: $('#stepResult'),
   stepStress: $('#stepStress'),
@@ -65,13 +69,25 @@ const els = {
 };
 
 const state = {
-  scenario: '',
+  scenario: '',       // 基础场景（不含补充）
+  supplements: [],    // 多轮补充的信息 [{text, pick, pickTitle}]
   options: [], // [{id,title,description,risk}]
   result: null, // 最近一次裁定结果
   user: null,
   authMode: 'login',
   demoScenarios: [],
 };
+
+/** 有效场景 = 基础场景 + 历轮补充（喂给 Jev 的完整上下文） */
+function effectiveScenario() {
+  if (!state.supplements.length) return state.scenario;
+  return [
+    state.scenario,
+    '',
+    '当事人后续补充的信息：',
+    ...state.supplements.map((s, i) => `${i + 1}. ${s.text}`),
+  ].join('\n');
+}
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -225,8 +241,10 @@ async function generateOptions() {
     return;
   }
   state.scenario = scenario;
+  state.supplements = []; // 新场景/换一批选项 → 轮次清零
   hide(els.errorLine);
   hide(els.stepResult);
+  hide(els.stepStress);
 
   setLoading(els.btnGenerate, true, '✨ AI 正在出题…');
   try {
@@ -299,7 +317,7 @@ async function decide() {
   };
 
   try {
-    api('/api/decide', { scenario: state.scenario, options: state.options }).then(
+    api('/api/decide', { scenario: effectiveScenario(), options: state.options }).then(
       (r) => { apiResult = r; settled = true; },
       (e) => { apiError = e; settled = true; }
     );
@@ -355,6 +373,13 @@ function renderResult(data) {
   hide(els.stepStress); // 新裁定后旧的压力测试作废
   const opt = state.options.find((o) => o.id === r.choice) || state.options[0];
 
+  // 本轮裁定是由补充信息触发的 → 把时间线上最新一轮补上裁定结果
+  const lastRound = state.supplements[state.supplements.length - 1];
+  if (lastRound && lastRound.pick === undefined) {
+    lastRound.pick = r.choice;
+    lastRound.pickTitle = opt.title;
+  }
+
   els.verdictTitle.textContent = opt.title;
   els.verdictDesc.textContent = opt.risk
     ? `${opt.description}（代价：${opt.risk}）`
@@ -371,6 +396,36 @@ function renderResult(data) {
   if (r.confidence != null) addBadge(`🎯 裁定置信度 ${Math.round(r.confidence * 100)}%`, 'violet');
   if (r.gutFeeling != null) addBadge(gutBadgeText(r.gutFeeling));
   if (r.importance) addBadge(`⚖ ${r.importance.label}`, 'gold');
+
+  // Jev 觉得信息不足时给出提示（阈值 0.5）
+  if (r.infoSufficient != null && r.infoSufficient < 0.5) {
+    els.infoHint.textContent = `🤔 Jev 觉得信息不太够（充足度 ${Math.round(r.infoSufficient * 100)}%）—— 补充点细节再裁一次，答案可能更靠谱`;
+    els.infoHint.classList.remove('hidden');
+  } else {
+    els.infoHint.classList.add('hidden');
+  }
+
+  // 多轮时间线
+  els.roundsTimeline.textContent = '';
+  els.roundsTimeline.classList.toggle('hidden', !state.supplements.length);
+  state.supplements.forEach((s, i) => {
+    const item = document.createElement('div');
+    item.className = 'round-item';
+    const no = document.createElement('span');
+    no.className = 'round-no';
+    no.textContent = `补充 ${i + 1}`;
+    const text = document.createElement('span');
+    text.textContent = s.text;
+    item.append(no, text);
+    if (s.pickTitle) {
+      const pick = document.createElement('span');
+      const prevTitle = i > 0 ? state.supplements[i - 1].pickTitle : null;
+      pick.className = `round-pick${prevTitle && prevTitle !== s.pickTitle ? ' changed' : ''}`;
+      pick.textContent = `→ 裁为 ${s.pickTitle}`;
+      item.append(pick);
+    }
+    els.roundsTimeline.append(item);
+  });
 
   // 概率条（按概率降序；全部同一系列色，胜出行用金环+徽章强调）
   const sorted = [...state.options].sort(
@@ -463,6 +518,21 @@ function renderResult(data) {
   els.meta.textContent = parts.join(' · ');
 }
 
+/* ---------------- 多轮补充 ---------------- */
+
+async function supplementAndRedecide() {
+  const text = els.supplementInput.value.trim();
+  if (!text) {
+    showError('先写点补充信息，再让 Jev 重新裁定');
+    els.supplementInput.focus();
+    return;
+  }
+  if (!state.result || state.deciding) return;
+  state.supplements.push({ text });
+  els.supplementInput.value = '';
+  await decide(); // decide 内部会把本轮裁定结果补到时间线上
+}
+
 /* ---------------- 决策压力测试 ---------------- */
 
 async function runStress() {
@@ -480,7 +550,7 @@ async function runStress() {
 
   try {
     const data = await api('/api/stress', {
-      scenario: state.scenario,
+      scenario: effectiveScenario(),
       options: state.options,
       choice: state.result.choice,
     });
@@ -656,11 +726,11 @@ function drawCapsule() {
   const d = new Date();
   ctx.fillText(`${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日`, W / 2, y);
 
-  // 场景卡
+  // 场景卡（含历轮补充的完整上下文）
   y += 56;
   ctx.textAlign = 'left';
   ctx.font = `400 28px ${FONT}`;
-  const scLines = wrapCanvasText(ctx, state.scenario, W - 160).slice(0, 5);
+  const scLines = wrapCanvasText(ctx, effectiveScenario(), W - 160).slice(0, 6);
   const scH = 40 + scLines.length * 44 + 30;
   ctx.fillStyle = 'rgba(255,255,255,0.05)';
   roundRect(ctx, 60, y, W - 120, scH, 20);
@@ -792,7 +862,7 @@ async function copyCapsuleText() {
   const opt = state.options.find((o) => o.id === r.choice) || state.options[0];
   const lines = [
     '🏺 我的命运胶囊',
-    `场景：${state.scenario}`,
+    `场景：${effectiveScenario()}`,
     `Jev 的裁定：${opt.title} —— ${opt.description}`,
     '概率分布：' + state.options
       .map((o) => `${o.title} ${fmtPct(r.probabilities[o.id] || 0)}`)
@@ -998,6 +1068,10 @@ els.btnRegen.addEventListener('click', generateOptions);
 els.btnDecide.addEventListener('click', decide);
 els.btnRedecide.addEventListener('click', decide);
 els.btnStress.addEventListener('click', runStress);
+els.btnSupplement.addEventListener('click', supplementAndRedecide);
+els.supplementInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) supplementAndRedecide();
+});
 els.btnCapsule.addEventListener('click', openCapsule);
 els.btnCapsuleClose.addEventListener('click', closeCapsule);
 els.btnCapsuleDownload.addEventListener('click', downloadCapsule);
@@ -1007,6 +1081,7 @@ els.btnReset.addEventListener('click', () => {
   hide(els.stepResult);
   hide(els.stepStress);
   state.result = null;
+  state.supplements = [];
   if (state.user) {
     els.scenario.value = '';
     els.scenario.focus();
@@ -1051,7 +1126,7 @@ els.btnHistoryMore.addEventListener('click', () => loadHistory(true));
 
 init();
 
-/* 自动演示模式：访问 /?demo=1 自动填入示例场景并走完全流程；&capsule=1 再自动打开命运胶囊 */
+/* 自动演示模式：?demo=1 走全流程；&capsule=1 自动打开命运胶囊；&round=1 自动补一轮信息 */
 const qs = new URLSearchParams(location.search);
 if (qs.get('demo') === '1') {
   (async () => {
@@ -1061,6 +1136,11 @@ if (qs.get('demo') === '1') {
     await generateOptions();
     await sleep(600);
     if (state.options.length >= 2) await decide();
+    if (qs.get('round') === '1' && state.result) {
+      await sleep(500);
+      els.supplementInput.value = '补充一下：我手里存款大概只够撑半年，而且家人更希望我回老家';
+      await supplementAndRedecide();
+    }
     await sleep(400);
     if (state.result) await runStress();
     if (qs.get('capsule') === '1' && state.result) openCapsule();

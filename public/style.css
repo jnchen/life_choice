@@ -362,6 +362,72 @@ textarea::placeholder { color: var(--muted); }
   text-align: center;
 }
 
+/* ---------------- 多轮补充 ---------------- */
+.rounds-timeline {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.round-item {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 13px;
+  color: var(--ink-2);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--series);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.round-item .round-no {
+  flex: none;
+  font-weight: 700;
+  color: var(--series);
+  font-size: 12px;
+}
+.round-item .round-pick {
+  flex: none;
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--gold);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.round-item .round-pick.changed { color: #ffb0b0; }
+
+.info-hint {
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(245, 198, 107, 0.4);
+  background: rgba(245, 198, 107, 0.08);
+  color: var(--gold);
+  font-size: 13.5px;
+  animation: cardIn 0.4s ease both;
+}
+
+.supplement-box {
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+.supplement-box textarea {
+  flex: 1;
+  min-height: 52px;
+  font-size: 13.5px;
+  padding: 10px 14px;
+}
+.supplement-box .btn {
+  flex: none;
+  align-self: stretch;
+  white-space: nowrap;
+  font-size: 14px;
+  padding: 0 18px;
+}
+
 .result-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -730,6 +796,8 @@ textarea:disabled { opacity: 0.6; cursor: not-allowed; }
 
 @media (max-width: 560px) {
   .card { padding: 20px 16px; }
+  .supplement-box { flex-direction: column; }
+  .supplement-box .btn { padding: 12px 18px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

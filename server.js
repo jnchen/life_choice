@@ -307,6 +307,10 @@ async function jevDecide(scenario, options) {
       type: 'noul',
       instructions: '从场景描述的措辞看，提问的人心里其实已经偏向其中某一个选项。',
     },
+    info_sufficient: {
+      type: 'noul',
+      instructions: '场景描述里包含的信息已经足够做出一个负责任的判断（1 = 信息充足，0 = 关键信息缺失，需要当事人补充更多细节）。',
+    },
     importance: {
       type: 'score',
       instructions: '这个决定对当事人人生的影响程度。',
@@ -326,6 +330,9 @@ async function jevDecide(scenario, options) {
   return {
     ...picked,
     gutFeeling: Number.isFinite(Number(answers.gut_feeling?.noul)) ? Number(answers.gut_feeling.noul) : null,
+    infoSufficient: Number.isFinite(Number(answers.info_sufficient?.noul))
+      ? Number(answers.info_sufficient.noul)
+      : null,
     importance:
       impLevel === null
         ? null
@@ -423,6 +430,7 @@ function mockDecide(options) {
     probabilities,
     confidence: 0.55 + Math.random() * 0.4,
     gutFeeling: Math.random(),
+    infoSufficient: Math.random(),
     importance: { score: level, level, label: IMPORTANCE_LEVELS[level] },
     model: 'jev-demo（未配置 TYPESAFE_API_KEY）',
     usage: null,
@@ -595,6 +603,7 @@ const server = http.createServer(async (req, res) => {
           risk: String(o.risk || '').trim().slice(0, 80),
         }));
       if (!scenario) return sendJSON(res, 400, { error: '缺少场景描述' });
+      if (scenario.length > 3000) return sendJSON(res, 400, { error: '场景描述太长了（含补充信息上限 3000 字）' });
       if (options.length < 2) return sendJSON(res, 400, { error: '至少需要两个选项才能执签' });
 
       const guestDemoFull = !user ? matchDemoScenario(scenario) : null;
